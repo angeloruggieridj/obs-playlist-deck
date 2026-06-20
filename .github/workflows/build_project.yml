@@ -34,7 +34,8 @@ jobs:
       - name: Install OBS dev headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y libobs-dev qt6-base-dev cmake ninja-build
+          sudo apt-get install -y libobs-dev qt6-base-dev cmake ninja-build \
+            libavformat-dev libavutil-dev
       - name: Configure
         run: |
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -215,6 +216,7 @@ jobs:
 
           # Rewrite absolute Qt install names to @rpath so the plugin resolves
           # Qt from OBS.app's bundled frameworks on any machine.
+          # Qt frameworks: rewrite absolute install names to @rpath/<Framework>.framework/...
           otool -L "$binary" | awk 'NR>1{print $1}' \
             | grep -E '/Qt[A-Za-z]+\.framework/' \
             | grep -v '^@rpath/' \
@@ -224,8 +226,21 @@ jobs:
                 install_name_tool -change "$dep" "$new" "$binary"
               done
 
-          if otool -L "$binary" | grep -E '/Qt[A-Za-z]+\.framework/' | grep -v '@rpath/'; then
-            echo "Absolute Qt install names leaked into the macOS plugin bundle"
+          # Other build-machine dylibs (e.g. ffmpeg libav*) shipped inside OBS.app:
+          # rewrite their absolute install names to @rpath/<basename> so they
+          # resolve from OBS.app's bundled frameworks at runtime.
+          otool -L "$binary" | awk 'NR>1{print $1}' \
+            | grep -E '^(/tmp/|/opt/homebrew/|/usr/local/)' \
+            | grep -vE '\.framework/' \
+            | while read -r dep; do
+                new="@rpath/$(basename "$dep")"
+                echo "Rewriting $dep -> $new"
+                install_name_tool -change "$dep" "$new" "$binary"
+              done
+
+          if otool -L "$binary" | awk 'NR>1{print $1}' \
+               | grep -E '^(/tmp/|/opt/homebrew/|/usr/local/)'; then
+            echo "Absolute build-machine install names leaked into the macOS plugin bundle"
             exit 1
           fi
 

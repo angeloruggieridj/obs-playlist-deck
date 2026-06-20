@@ -40,8 +40,19 @@ TEST_CASE("m3u parse handles EXTINF, comments, crlf, spaces") {
     REQUIRE(items.size() == 2);
     CHECK(items[0].path == "/videos/intro clip.mp4");
     CHECK(items[0].title == "Intro Clip");
+    CHECK(items[0].durationMs == 12000); // EXTINF seconds -> ms
     CHECK(items[1].path == "/videos/no-info.mov");
     CHECK(items[1].title == "no-info"); // stem fallback
+}
+
+TEST_CASE("json round-trip preserves duration") {
+    std::vector<PlaylistItem> in = {{"/a/x.mp4", "X", 90000}, {"/b/y.mov", "Y", -1}};
+    std::string text = io::toJson("L", in);
+    std::string name;
+    std::vector<PlaylistItem> out;
+    REQUIRE(io::fromJson(text, name, out));
+    CHECK(out == in);
+    CHECK(out[0].durationMs == 90000);
 }
 
 TEST_CASE("m3u write then parse round-trips paths") {

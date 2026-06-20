@@ -2,6 +2,7 @@ add_library(playlist-deck-core STATIC
   Playlist.cpp
   MediaPath.cpp
   PlaylistIO.cpp
+  Format.cpp
 )
 target_include_directories(playlist-deck-core
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

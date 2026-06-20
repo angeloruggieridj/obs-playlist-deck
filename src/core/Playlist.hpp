@@ -7,10 +7,11 @@ namespace pld {
 struct PlaylistItem {
     std::string path;
     std::string title;
+    long long durationMs = -1; // -1 == unknown
 };
 
 inline bool operator==(const PlaylistItem& a, const PlaylistItem& b) {
-    return a.path == b.path && a.title == b.title;
+    return a.path == b.path && a.title == b.title && a.durationMs == b.durationMs;
 }
 
 class Playlist {

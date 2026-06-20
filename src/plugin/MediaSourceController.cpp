@@ -53,6 +53,26 @@ bool MediaSourceController::setFileAndRestart(const std::string& path) {
     return true;
 }
 
+bool MediaSourceController::setFileLoadOnly(const std::string& path) {
+    if (!source_) return false;
+    obs_data_t* settings = obs_source_get_settings(source_);
+    obs_data_set_bool(settings, "is_local_file", true);
+    obs_data_set_string(settings, "local_file", path.c_str());
+    obs_source_update(source_, settings);
+    obs_data_release(settings);
+    // Restart to load the first frame, then immediately pause so the clip is
+    // staged but not playing (even while the scene is live in program).
+    obs_source_media_restart(source_);
+    obs_source_media_play_pause(source_, true);
+    return true;
+}
+
+long long MediaSourceController::currentDurationMs() const {
+    if (!source_) return -1;
+    int64_t d = obs_source_media_get_duration(source_);
+    return d > 0 ? static_cast<long long>(d) : -1;
+}
+
 void MediaSourceController::play() {
     if (source_) obs_source_media_play_pause(source_, false);
 }

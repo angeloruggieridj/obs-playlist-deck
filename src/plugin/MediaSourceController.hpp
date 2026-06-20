@@ -19,6 +19,8 @@ public:
     std::string boundName() const { return boundName_; }
 
     bool setFileAndRestart(const std::string& path);
+    bool setFileLoadOnly(const std::string& path); // set file, then pause on first frame
+    long long currentDurationMs() const;           // -1 if unknown / not bound
     void play();
     void pause();
     void togglePlayPause();
