@@ -1,0 +1,267 @@
+name: Build Plugin
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  OBS_VERSION: "32.1.2"
+  OBS_DEPS_VERSION: "2025-08-23"
+
+jobs:
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - run: cmake -B build -S . -G Ninja -DBUILD_PLUGIN=OFF -DBUILD_TESTS=ON
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+
+  linux:
+    name: Linux x86_64
+    needs: tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install OBS dev headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libobs-dev qt6-base-dev cmake ninja-build
+      - name: Configure
+        run: |
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=OFF -DCMAKE_PREFIX_PATH="/usr"
+      - name: Build
+        run: cmake --build build
+      - name: Install
+        run: DESTDIR="${{ github.workspace }}/release" cmake --install build
+      - name: Package
+        run: tar -czf obs-playlist-deck-linux-x86_64.tar.gz -C "${{ github.workspace }}/release" .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: obs-playlist-deck-linux
+          path: obs-playlist-deck-linux-x86_64.tar.gz
+
+  windows:
+    name: Windows x64
+    needs: tests
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Qt6
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "aqtinstall==3.1.*" "py7zr<1.0"
+          python -m aqt install-qt windows desktop 6.7.3 win64_msvc2019_64 -O C:\Qt
+          "Qt6_DIR=C:\Qt\6.7.3\msvc2019_64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C:\Qt\6.7.3\msvc2019_64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Download OBS pre-built deps
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path C:\deps-raw -Force
+          New-Item -ItemType Directory -Path C:\obs-deps -Force
+          gh release download --repo obsproject/obs-deps --pattern "windows-deps-[0-9]*-x64*.zip" --dir C:\deps-raw
+          $zip = (Get-ChildItem "C:\deps-raw" -Filter "*.zip" | Select-Object -First 1).FullName
+          Expand-Archive $zip -DestinationPath C:\obs-deps-extract
+          $top = Get-ChildItem "C:\obs-deps-extract"
+          if ($top.Count -eq 1 -and $top[0].PSIsContainer) {
+            Get-ChildItem $top[0].FullName | Move-Item -Destination C:\obs-deps
+          } else {
+            $top | Move-Item -Destination C:\obs-deps
+          }
+      - name: Download OBS source
+        shell: powershell
+        run: |
+          Invoke-WebRequest "https://github.com/obsproject/obs-studio/archive/refs/tags/${{ env.OBS_VERSION }}.zip" -OutFile obs.zip
+          Expand-Archive obs.zip -DestinationPath C:\
+      - name: Configure OBS
+        shell: cmd
+        run: |
+          cmake -B C:\obs-build -S "C:\obs-studio-${{ env.OBS_VERSION }}" -A x64 ^
+            -DENABLE_PLUGINS=OFF ^
+            -DENABLE_SCRIPTING=OFF ^
+            -DENABLE_BROWSER=OFF ^
+            -DENABLE_UPDATER=OFF ^
+            -DCMAKE_SYSTEM_VERSION=10.0 ^
+            -DDepsPath="C:\obs-deps" ^
+            -DFFMPEG_PATH="C:\obs-deps" ^
+            -DQTDIR="%Qt6_DIR%" ^
+            -DCMAKE_PREFIX_PATH="C:\obs-deps;%Qt6_DIR%"
+      - name: Build OBS
+        run: cmake --build C:\obs-build --target obs-frontend-api --config Release --parallel
+      - name: Install OBS dev
+        run: cmake --install C:\obs-build --config Release --component Development --prefix C:\obs-dev
+      - name: Configure plugin
+        shell: cmd
+        run: |
+          cmake -B build -S . -A x64 ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DBUILD_TESTS=OFF ^
+            -DCMAKE_PREFIX_PATH="C:\obs-dev;%Qt6_DIR%;C:\obs-deps"
+      - name: Build plugin
+        run: cmake --build build --config Release
+      - name: Install plugin
+        run: cmake --install build --config Release --prefix "${{ github.workspace }}\release"
+      - name: Package
+        run: Compress-Archive -Path "${{ github.workspace }}\release\*" -DestinationPath obs-playlist-deck-windows.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: obs-playlist-deck-windows
+          path: obs-playlist-deck-windows.zip
+
+  macos:
+    name: macOS universal
+    needs: tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies
+        run: brew install cmake ninja
+      - name: Download universal OBS pre-built deps
+        run: |
+          mkdir -p /tmp/obs-deps /tmp/obs-deps-qt6
+          curl -fsSL \
+            "https://github.com/obsproject/obs-deps/releases/download/${{ env.OBS_DEPS_VERSION }}/macos-deps-${{ env.OBS_DEPS_VERSION }}-universal.tar.xz" \
+            | tar -xJ -C /tmp/obs-deps
+          curl -fsSL \
+            "https://github.com/obsproject/obs-deps/releases/download/${{ env.OBS_DEPS_VERSION }}/macos-deps-qt6-${{ env.OBS_DEPS_VERSION }}-universal.tar.xz" \
+            | tar -xJ -C /tmp/obs-deps-qt6
+      - name: Clone OBS source
+        run: |
+          git clone --depth=1 --branch ${{ env.OBS_VERSION }} \
+            https://github.com/obsproject/obs-studio.git /tmp/obs
+          # libobs-metal is a Swift-only target and OBS never enables the Swift
+          # language, which breaks CMake generate ("can not determine linker
+          # language"). It is a runtime graphics module nothing here links, so
+          # drop it; we only need libobs + obs-frontend-api dev files.
+          sed -i.bak 's/^\( *\)add_subdirectory(libobs-metal)/\1# disabled for dev build: add_subdirectory(libobs-metal)/' /tmp/obs/CMakeLists.txt
+      - name: Configure OBS (universal)
+        run: |
+          cmake -B /tmp/obs-build -S /tmp/obs \
+            -G Xcode \
+            -DENABLE_PLUGINS=OFF \
+            -DENABLE_SCRIPTING=OFF \
+            -DENABLE_BROWSER=OFF \
+            -DENABLE_VLC=OFF \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
+            -DCMAKE_PREFIX_PATH="/tmp/obs-deps-qt6;/tmp/obs-deps"
+      - name: Build OBS
+        run: cmake --build /tmp/obs-build --target obs-frontend-api --config Release --parallel
+      - name: Install OBS dev
+        run: cmake --install /tmp/obs-build --config Release --component Development --prefix /tmp/obs-dev
+      - name: Configure plugin (universal)
+        run: |
+          cmake -B build -S . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=OFF \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -Dlibobs_DIR="/tmp/obs-dev/Frameworks/libobs.framework/Resources/cmake" \
+            -Dobs-frontend-api_DIR="/tmp/obs-dev/lib/cmake/obs-frontend-api" \
+            -DQt6_DIR="/tmp/obs-deps-qt6/lib/cmake/Qt6" \
+            -DCMAKE_PREFIX_PATH="/tmp/obs-dev;/tmp/obs-deps-qt6;/tmp/obs-deps"
+      - name: Build plugin
+        run: cmake --build build
+      - name: Install plugin
+        run: DESTDIR="${{ github.workspace }}/release" cmake --install build
+      - name: Package .plugin (universal, @rpath Qt)
+        run: |
+          bundle="macos-package/obs-playlist-deck.plugin"
+          mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
+
+          binary_src="$(find "${{ github.workspace }}/release" -type f -name 'libobs-playlist-deck.*' -print -quit)"
+          data_dir="$(find "${{ github.workspace }}/release" -type d -path '*/obs-playlist-deck' -print -quit)"
+
+          if [ -z "$binary_src" ]; then
+            echo "Could not find the built macOS plugin binary"
+            find "${{ github.workspace }}/release" -maxdepth 6 -type f -print
+            exit 1
+          fi
+
+          cp "$binary_src" "$bundle/Contents/MacOS/obs-playlist-deck"
+          [ -n "$data_dir" ] && cp -R "$data_dir"/. "$bundle/Contents/Resources/"
+          chmod +x "$bundle/Contents/MacOS/obs-playlist-deck"
+          binary="$bundle/Contents/MacOS/obs-playlist-deck"
+
+          cat > "$bundle/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key><string>en</string>
+            <key>CFBundleExecutable</key><string>obs-playlist-deck</string>
+            <key>CFBundleIdentifier</key><string>com.angeloruggieridj.obs-playlist-deck</string>
+            <key>CFBundleName</key><string>Playlist Deck</string>
+            <key>CFBundlePackageType</key><string>BNDL</string>
+            <key>CFBundleShortVersionString</key><string>1.0.0</string>
+            <key>CFBundleVersion</key><string>1.0.0</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+          </dict>
+          </plist>
+          PLIST
+          printf 'BNDL????' > "$bundle/Contents/PkgInfo"
+
+          # Rewrite absolute Qt install names to @rpath so the plugin resolves
+          # Qt from OBS.app's bundled frameworks on any machine.
+          otool -L "$binary" | awk 'NR>1{print $1}' \
+            | grep -E '/Qt[A-Za-z]+\.framework/' \
+            | grep -v '^@rpath/' \
+            | while read -r dep; do
+                new="$(printf '%s' "$dep" | sed -E 's#^.*/(Qt[A-Za-z]+\.framework/.*)$#@rpath/\1#')"
+                echo "Rewriting $dep -> $new"
+                install_name_tool -change "$dep" "$new" "$binary"
+              done
+
+          if otool -L "$binary" | grep -E '/Qt[A-Za-z]+\.framework/' | grep -v '@rpath/'; then
+            echo "Absolute Qt install names leaked into the macOS plugin bundle"
+            exit 1
+          fi
+
+          archs="$(lipo -archs "$binary")"
+          echo "binary archs: $archs"
+          echo "$archs" | grep -q x86_64 && echo "$archs" | grep -q arm64 \
+            || { echo "binary is not universal (x86_64 + arm64)"; exit 1; }
+
+          codesign --force --sign - "$binary"
+          codesign --force --deep --sign - "$bundle"
+
+          tar -czf obs-playlist-deck-macos-universal.tar.gz -C macos-package obs-playlist-deck.plugin
+      - uses: actions/upload-artifact@v7
+        with:
+          name: obs-playlist-deck-macos
+          path: obs-playlist-deck-macos-universal.tar.gz
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs:
+      - tests
+      - linux
+      - windows
+      - macos
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            release-assets/obs-playlist-deck-linux-x86_64.tar.gz
+            release-assets/obs-playlist-deck-windows.zip
+            release-assets/obs-playlist-deck-macos-universal.tar.gz
