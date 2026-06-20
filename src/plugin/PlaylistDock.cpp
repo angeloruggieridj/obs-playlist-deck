@@ -187,7 +187,6 @@ void PlaylistDock::buildUi() {
     col->addLayout(plRow);
 
     loadedLabel_ = new QLabel("No playlist loaded");
-    loadedLabel_->setStyleSheet("color: palette(mid);");
     loadedLabel_->setWordWrap(true);
     col->addWidget(loadedLabel_);
 
@@ -200,7 +199,7 @@ void PlaylistDock::buildUi() {
     versionLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     versionLabel_->setTextFormat(Qt::RichText);
     versionLabel_->setOpenExternalLinks(true);
-    versionLabel_->setStyleSheet("color: palette(mid);");
+    versionLabel_->setToolTip("Installed Playlist Deck version");
     auto* verRow = new QHBoxLayout();
     verRow->addStretch(1);
     verRow->addWidget(versionLabel_);
