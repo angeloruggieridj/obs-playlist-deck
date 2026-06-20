@@ -206,8 +206,8 @@ jobs:
             <key>CFBundleIdentifier</key><string>com.angeloruggieridj.obs-playlist-deck</string>
             <key>CFBundleName</key><string>Playlist Deck</string>
             <key>CFBundlePackageType</key><string>BNDL</string>
-            <key>CFBundleShortVersionString</key><string>1.0.0</string>
-            <key>CFBundleVersion</key><string>1.0.0</string>
+            <key>CFBundleShortVersionString</key><string>1.0.1</string>
+            <key>CFBundleVersion</key><string>1.0.1</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
           </dict>
           </plist>
