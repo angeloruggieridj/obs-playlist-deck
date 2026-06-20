@@ -10,15 +10,25 @@ No browser source, no embedded web server, no HTML player. Pure OBS + Qt.
 
 ## Features
 
-- Native Qt dock living inside OBS.
+- Native Qt dock living inside OBS — no browser source, no web server.
 - Bind to any existing **Media Source** (`ffmpeg_source`) or **VLC Source**
   via a dropdown.
 - Playlist with add / remove / reorder / clear and transport controls
-  (play, pause, stop, prev, next).
-- Auto-advance on media end, with optional looping (wrap).
-- Named playlists: save / load / delete (stored in the OBS module config).
-- Import / Export playlists as `.json` or `.m3u/.m3u8`.
+  (play, prev, play-pause, stop, next), with each item's **duration** shown.
+- **On end** behavior selector:
+  - *Play next* — auto-advance to the next item.
+  - *Loop* — auto-advance and wrap around.
+  - *Load next (paused)* — hold the finished clip's last frame on program and
+    stage the next clip (paused, off-air) only when the source leaves program
+    (studio-mode program → preview). The next clip's first frame never goes
+    live and the playlist never auto-advances on air.
+  - *Stop* — stop at the end of the clip.
+- Save / open playlists as **`.json` or `.m3u/.m3u8`** to a location you choose;
+  the loaded playlist file is shown in the dock.
 - Global OBS hotkeys: next, previous, play/pause, stop.
+- Remembers the **On end** mode and the bound source across restarts.
+- Shows the plugin version and links to the latest release when an update is
+  available (manual download — no auto-install).
 - Cross-platform: Windows x64, Linux x86_64, macOS universal (Intel + Apple
   Silicon).
 
@@ -49,11 +59,22 @@ Then open OBS → the **Playlist Deck** dock appears under the *Docks* menu.
 
 ## Usage
 
-1. Add a **Media Source** (or VLC Source) to your scene in OBS.
+1. Add a **Media Source** (or VLC Source) to a scene in OBS.
 2. In the Playlist Deck dock, pick that source from the **Media source**
    dropdown.
-3. Add media files, then double-click an item (or "Play selected") to play it
-   through that source. Enable **Loop playlist** for continuous wrap-around.
+3. **Add** media files, then double-click an item (or select it and press
+   **Play**) to play it through that source.
+4. Pick an **On end** behavior. Use **Save** / **Open** to keep playlists as
+   files you choose (`.json` or `.m3u`).
+
+### macOS Gatekeeper note
+
+The macOS build is ad-hoc signed (not notarized), so after downloading you must
+clear the download quarantine once, otherwise OBS won't load it:
+
+```bash
+xattr -dr com.apple.quarantine "$HOME/Library/Application Support/obs-studio/plugins/obs-playlist-deck.plugin"
+```
 
 ## Build from source
 
