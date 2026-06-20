@@ -27,10 +27,11 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
+#include <QPushButton>
 #include <QSvgRenderer>
 #include <QTimer>
-#include <QToolButton>
 #include <QUrl>
+#include <QVariant>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -51,9 +52,9 @@ const char* kLatestApi =
 PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     setWindowTitle(QString::fromUtf8(obs_module_text("PlaylistDeck")));
     setObjectName("obs-playlist-deck-dock");
+    loadSettings();
     buildUi();
     refreshSources();
-    refreshPlaylistCombo();
     controller_.setOnMediaEnded([this]() {
         QMetaObject::invokeMethod(this, "onMediaEnded", Qt::QueuedConnection);
     });
@@ -62,9 +63,19 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
 }
 
 PlaylistDock::~PlaylistDock() {
+    // Most obs cleanup happens in shutdown() (called on EXIT). Guard against the
+    // case where the dtor runs without a prior shutdown.
+    if (!obsShutdown_) shutdown();
+}
+
+void PlaylistDock::shutdown() {
+    if (obsShutdown_) return;
+    saveSettings();
+    obsShutdown_ = true;
     unregisterHotkeys();
     controller_.setOnMediaEnded(nullptr);
     controller_.unbind();
+    if (net_) net_->disconnect();
 }
 
 QIcon PlaylistDock::tintedIcon(const QString& resource) const {
@@ -77,7 +88,6 @@ QIcon PlaylistDock::tintedIcon(const QString& resource) const {
         QPainter p(&pm);
         renderer.render(&p);
     }
-    // Tint the rendered shape with the current theme's button text color.
     QColor c = palette().color(QPalette::ButtonText);
     {
         QPainter p(&pm);
@@ -102,14 +112,12 @@ void PlaylistDock::buildUi() {
         return l;
     };
 
-    // Text + icon button.
+    // Real push button with a tinted icon beside its text.
     auto mk = [this](const QString& icon, const QString& text, const QString& tip) {
-        auto* b = new QToolButton();
-        b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        b->setIcon(tintedIcon(icon));
-        b->setText(text);
+        auto* b = new QPushButton(tintedIcon(icon), " " + text);
         b->setToolTip(tip);
         b->setFocusPolicy(Qt::NoFocus);
+        b->setCursor(Qt::PointingHandCursor);
         return b;
     };
 
@@ -118,7 +126,7 @@ void PlaylistDock::buildUi() {
     sourceCombo_ = new QComboBox();
     sourceCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     sourceCombo_->setMinimumHeight(26);
-    auto* refreshBtn = mk(":/icons/refresh.svg", "Refresh", "Rescan media sources in the current setup");
+    auto* refreshBtn = mk(":/icons/refresh.svg", "Refresh", "Rescan media sources");
     auto* srcRow = new QHBoxLayout();
     srcRow->addWidget(sourceCombo_, 1);
     srcRow->addWidget(refreshBtn);
@@ -164,7 +172,7 @@ void PlaylistDock::buildUi() {
     endRow->addWidget(endCombo_, 1);
     col->addLayout(endRow);
 
-    // ---- Saved playlists --------------------------------------------------
+    // ---- Saved playlists (session list of user-chosen files) --------------
     col->addWidget(sectionLabel("Saved playlists"));
     playlistCombo_ = new QComboBox();
     playlistCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -173,21 +181,13 @@ void PlaylistDock::buildUi() {
 
     auto* plRow = new QHBoxLayout();
     plRow->setSpacing(3);
-    auto* saveBtn = mk(":/icons/save.svg", "Save", "Save current playlist with a new name");
-    auto* loadBtn = mk(":/icons/folder-open.svg", "Load", "Load the selected saved playlist");
-    auto* renameBtn = mk(":/icons/pencil.svg", "Rename", "Rename the selected saved playlist");
-    auto* delBtn = mk(":/icons/trash.svg", "Delete", "Delete the selected saved playlist");
-    for (auto* b : {saveBtn, loadBtn, renameBtn, delBtn}) plRow->addWidget(b);
+    auto* saveBtn = mk(":/icons/save.svg", "Save", "Save the playlist to a file you choose");
+    auto* openBtn = mk(":/icons/folder-open.svg", "Open", "Open a playlist file (.json / .m3u)");
+    auto* renameBtn = mk(":/icons/pencil.svg", "Rename", "Rename the selected playlist file");
+    auto* removeBtn = mk(":/icons/trash.svg", "Remove", "Remove the selected entry from this list");
+    for (auto* b : {saveBtn, openBtn, renameBtn, removeBtn}) plRow->addWidget(b);
     plRow->addStretch(1);
     col->addLayout(plRow);
-
-    auto* ioRow = new QHBoxLayout();
-    ioRow->setSpacing(3);
-    auto* impBtn = mk(":/icons/download.svg", "Import", "Import a playlist file (.json / .m3u)");
-    auto* expBtn = mk(":/icons/upload.svg", "Export", "Export the playlist to a file (.json / .m3u)");
-    for (auto* b : {impBtn, expBtn}) ioRow->addWidget(b);
-    ioRow->addStretch(1);
-    col->addLayout(ioRow);
 
     // ---- Status + version -------------------------------------------------
     status_ = new QLabel("");
@@ -206,29 +206,31 @@ void PlaylistDock::buildUi() {
 
     setWidget(root);
 
-    connect(refreshBtn, &QToolButton::clicked, this, &PlaylistDock::refreshSources);
-    connect(addBtn, &QToolButton::clicked, this, &PlaylistDock::onAddFiles);
-    connect(rmBtn, &QToolButton::clicked, this, &PlaylistDock::onRemove);
-    connect(upBtn, &QToolButton::clicked, this, &PlaylistDock::onUp);
-    connect(downBtn, &QToolButton::clicked, this, &PlaylistDock::onDown);
-    connect(clrBtn, &QToolButton::clicked, this, &PlaylistDock::onClear);
-    connect(playSelBtn, &QToolButton::clicked, this, &PlaylistDock::onPlaySelected);
-    connect(prevBtn, &QToolButton::clicked, this, &PlaylistDock::onPrev);
-    connect(playPauseBtn, &QToolButton::clicked, this, &PlaylistDock::onTogglePlayPause);
-    connect(stopBtn, &QToolButton::clicked, this, &PlaylistDock::onStop);
-    connect(nextBtn, &QToolButton::clicked, this, &PlaylistDock::onNext);
-    connect(saveBtn, &QToolButton::clicked, this, &PlaylistDock::onSavePlaylist);
-    connect(loadBtn, &QToolButton::clicked, this, &PlaylistDock::onLoadPlaylist);
-    connect(renameBtn, &QToolButton::clicked, this, &PlaylistDock::onRenamePlaylist);
-    connect(delBtn, &QToolButton::clicked, this, &PlaylistDock::onDeletePlaylist);
-    connect(impBtn, &QToolButton::clicked, this, &PlaylistDock::onImport);
-    connect(expBtn, &QToolButton::clicked, this, &PlaylistDock::onExport);
+    connect(refreshBtn, &QPushButton::clicked, this, &PlaylistDock::refreshSources);
+    connect(addBtn, &QPushButton::clicked, this, &PlaylistDock::onAddFiles);
+    connect(rmBtn, &QPushButton::clicked, this, &PlaylistDock::onRemove);
+    connect(upBtn, &QPushButton::clicked, this, &PlaylistDock::onUp);
+    connect(downBtn, &QPushButton::clicked, this, &PlaylistDock::onDown);
+    connect(clrBtn, &QPushButton::clicked, this, &PlaylistDock::onClear);
+    connect(playSelBtn, &QPushButton::clicked, this, &PlaylistDock::onPlaySelected);
+    connect(prevBtn, &QPushButton::clicked, this, &PlaylistDock::onPrev);
+    connect(playPauseBtn, &QPushButton::clicked, this, &PlaylistDock::onTogglePlayPause);
+    connect(stopBtn, &QPushButton::clicked, this, &PlaylistDock::onStop);
+    connect(nextBtn, &QPushButton::clicked, this, &PlaylistDock::onNext);
+    connect(saveBtn, &QPushButton::clicked, this, &PlaylistDock::onSavePlaylist);
+    connect(openBtn, &QPushButton::clicked, this, &PlaylistDock::onOpenPlaylist);
+    connect(renameBtn, &QPushButton::clicked, this, &PlaylistDock::onRenamePlaylist);
+    connect(removeBtn, &QPushButton::clicked, this, &PlaylistDock::onRemoveSaved);
     connect(list_, &QListWidget::itemDoubleClicked, this,
             [this](QListWidgetItem*) { onPlaySelected(); });
     connect(sourceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             &PlaylistDock::onSourceChanged);
-    connect(endCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            [this](int i) { mode_ = static_cast<EndMode>(i); });
+    connect(playlistCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            &PlaylistDock::onSavedSelected);
+    connect(endCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int i) {
+        mode_ = static_cast<EndMode>(i);
+        saveSettings();
+    });
 }
 
 QString PlaylistDock::itemText(int row) const {
@@ -284,9 +286,6 @@ void PlaylistDock::loadIndex(int row) {
     }
     if (controller_.setFileLoadOnly(it->path)) {
         setStatus(QStringLiteral("Loaded (paused): %1").arg(QString::fromStdString(it->title)));
-        // The media source starts decoding asynchronously; re-issue the pause a
-        // few times so it reliably stays paused on the first frame even though
-        // the scene is live in program.
         QTimer::singleShot(120, this, [this]() { controller_.pause(); });
         QTimer::singleShot(400, this, [this]() { controller_.pause(); });
         QTimer::singleShot(700, this, &PlaylistDock::captureCurrentDuration);
@@ -299,7 +298,7 @@ void PlaylistDock::loadIndex(int row) {
 void PlaylistDock::captureCurrentDuration() {
     int row = playlist_.currentIndex();
     if (row < 0 || row >= playlist_.size()) return;
-    if (playlist_.items()[row].durationMs >= 0) return; // already known
+    if (playlist_.items()[row].durationMs >= 0) return;
     long long d = controller_.currentDurationMs();
     if (d < 0) return;
     auto items = playlist_.items();
@@ -387,12 +386,12 @@ void PlaylistDock::onTogglePlayPause() { controller_.togglePlayPause(); }
 void PlaylistDock::onStop() { controller_.stop(); }
 
 void PlaylistDock::onNext() {
-    int i = playlist_.next(wrapEnabled());
+    int i = playlist_.next(mode_ == Loop);
     if (i >= 0) playIndex(i);
 }
 
 void PlaylistDock::onPrev() {
-    int i = playlist_.prev(wrapEnabled());
+    int i = playlist_.prev(mode_ == Loop);
     if (i >= 0) playIndex(i);
 }
 
@@ -404,10 +403,12 @@ void PlaylistDock::onSourceChanged(int) {
     }
     controller_.bind(name.toStdString());
     setStatus(QStringLiteral("Bound to: %1").arg(name));
+    saveSettings();
 }
 
 void PlaylistDock::refreshSources() {
-    QString prev = sourceCombo_ ? sourceCombo_->currentText() : QString();
+    QString prev = sourceCombo_->currentText();
+    if (prev.isEmpty() && !pendingSource_.isEmpty()) prev = pendingSource_;
     sourceCombo_->blockSignals(true);
     sourceCombo_->clear();
     for (const auto& n : MediaSourceController::listMediaSources())
@@ -418,117 +419,13 @@ void PlaylistDock::refreshSources() {
     onSourceChanged(sourceCombo_->currentIndex());
 }
 
-std::string PlaylistDock::configDir() const {
-    char* p = obs_module_config_path("playlists");
-    std::string s = p ? p : "";
-    bfree(p);
-    if (!s.empty()) QDir().mkpath(QString::fromStdString(s));
-    return s;
-}
+// ---- Saved-playlist file handling ----------------------------------------
 
-void PlaylistDock::refreshPlaylistCombo() {
-    QString prev = playlistCombo_->currentText();
-    playlistCombo_->clear();
-    QDir dir(QString::fromStdString(configDir()));
-    const auto entries = dir.entryInfoList(QStringList() << "*.json", QDir::Files, QDir::Name);
-    for (const auto& fi : entries) playlistCombo_->addItem(fi.completeBaseName());
-    int idx = playlistCombo_->findText(prev);
-    if (idx >= 0) playlistCombo_->setCurrentIndex(idx);
-}
-
-void PlaylistDock::onSavePlaylist() {
-    bool ok = false;
-    QString name =
-        QInputDialog::getText(this, "Save playlist", "Name:", QLineEdit::Normal, "", &ok);
-    if (!ok || name.isEmpty()) return;
-    std::string text = io::toJson(name.toStdString(), playlist_.items());
-    QString path = QString::fromStdString(configDir()) + "/" + name + ".json";
-    QFile f(path);
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        f.write(text.c_str());
-        f.close();
-    }
-    refreshPlaylistCombo();
-    setStatus(QStringLiteral("Saved playlist: %1").arg(name));
-}
-
-void PlaylistDock::onLoadPlaylist() {
-    QString name = playlistCombo_->currentText();
-    if (name.isEmpty()) return;
-    QString path = QString::fromStdString(configDir()) + "/" + name + ".json";
+bool PlaylistDock::loadPlaylistFile(const QString& path) {
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) {
-        setStatus("Cannot open playlist.", true);
-        return;
-    }
-    std::string text = f.readAll().toStdString();
-    f.close();
-    std::string n;
-    std::vector<PlaylistItem> items;
-    if (!io::fromJson(text, n, items)) {
-        setStatus("Invalid playlist file.", true);
-        return;
-    }
-    playlist_.setItems(std::move(items));
-    rebuildList();
-    setStatus(QStringLiteral("Loaded playlist: %1").arg(name));
-}
-
-void PlaylistDock::onRenamePlaylist() {
-    QString oldName = playlistCombo_->currentText();
-    if (oldName.isEmpty()) return;
-    bool ok = false;
-    QString newName =
-        QInputDialog::getText(this, "Rename playlist", "New name:", QLineEdit::Normal, oldName, &ok);
-    if (!ok || newName.isEmpty() || newName == oldName) return;
-    QString dir = QString::fromStdString(configDir());
-    QString oldPath = dir + "/" + oldName + ".json";
-    QString newPath = dir + "/" + newName + ".json";
-    if (QFile::exists(newPath)) {
-        setStatus("A playlist with that name already exists.", true);
-        return;
-    }
-    if (!QFile::rename(oldPath, newPath)) {
-        setStatus("Rename failed.", true);
-        return;
-    }
-    // Keep the stored "name" field in sync with the new file name.
-    QFile f(newPath);
-    if (f.open(QIODevice::ReadOnly)) {
-        std::string text = f.readAll().toStdString();
-        f.close();
-        std::string n;
-        std::vector<PlaylistItem> items;
-        if (io::fromJson(text, n, items)) {
-            std::string out = io::toJson(newName.toStdString(), items);
-            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                f.write(out.c_str());
-                f.close();
-            }
-        }
-    }
-    refreshPlaylistCombo();
-    int idx = playlistCombo_->findText(newName);
-    if (idx >= 0) playlistCombo_->setCurrentIndex(idx);
-    setStatus(QStringLiteral("Renamed to: %1").arg(newName));
-}
-
-void PlaylistDock::onDeletePlaylist() {
-    QString name = playlistCombo_->currentText();
-    if (name.isEmpty()) return;
-    QFile::remove(QString::fromStdString(configDir()) + "/" + name + ".json");
-    refreshPlaylistCombo();
-    setStatus(QStringLiteral("Deleted playlist: %1").arg(name));
-}
-
-void PlaylistDock::onImport() {
-    QString path = QFileDialog::getOpenFileName(this, "Import playlist", "",
-                                                "Playlists (*.json *.m3u *.m3u8)");
-    if (path.isEmpty()) return;
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) {
-        setStatus("Cannot open file.", true);
-        return;
+        setStatus("Cannot open playlist file.", true);
+        return false;
     }
     std::string text = f.readAll().toStdString();
     f.close();
@@ -537,7 +434,7 @@ void PlaylistDock::onImport() {
         std::string n;
         if (!io::fromJson(text, n, items)) {
             setStatus("Invalid JSON playlist.", true);
-            return;
+            return false;
         }
     } else {
         items = io::parseM3u(text);
@@ -546,27 +443,136 @@ void PlaylistDock::onImport() {
         if (it.durationMs < 0) it.durationMs = pld::probeDurationMs(it.path);
     playlist_.setItems(std::move(items));
     rebuildList();
-    setStatus("Imported playlist.");
+    return true;
 }
 
-void PlaylistDock::onExport() {
-    QString path = QFileDialog::getSaveFileName(this, "Export playlist", "",
+void PlaylistDock::addOrSelectSaved(const QString& path) {
+    loadingCombo_ = true;
+    QString name = QFileInfo(path).completeBaseName();
+    int existing = playlistCombo_->findData(path);
+    if (existing < 0) {
+        playlistCombo_->addItem(name, path);
+        existing = playlistCombo_->count() - 1;
+    } else {
+        playlistCombo_->setItemText(existing, name);
+    }
+    playlistCombo_->setCurrentIndex(existing);
+    loadingCombo_ = false;
+}
+
+void PlaylistDock::onSavedSelected(int index) {
+    if (loadingCombo_ || index < 0) return;
+    QString path = playlistCombo_->itemData(index).toString();
+    if (path.isEmpty()) return;
+    if (loadPlaylistFile(path))
+        setStatus(QStringLiteral("Loaded: %1").arg(playlistCombo_->itemText(index)));
+}
+
+void PlaylistDock::onSavePlaylist() {
+    QString path = QFileDialog::getSaveFileName(this, "Save playlist", "",
                                                 "JSON (*.json);;M3U (*.m3u)");
     if (path.isEmpty()) return;
+    if (!path.endsWith(".json", Qt::CaseInsensitive) && !path.endsWith(".m3u", Qt::CaseInsensitive))
+        path += ".json";
     std::string text = path.endsWith(".m3u", Qt::CaseInsensitive)
                            ? io::toM3u(playlist_.items())
-                           : io::toJson("playlist", playlist_.items());
+                           : io::toJson(QFileInfo(path).completeBaseName().toStdString(),
+                                        playlist_.items());
     QFile f(path);
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        f.write(text.c_str());
-        f.close();
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        setStatus("Cannot write playlist file.", true);
+        return;
     }
-    setStatus("Exported playlist.");
+    f.write(text.c_str());
+    f.close();
+    addOrSelectSaved(path);
+    setStatus(QStringLiteral("Saved: %1").arg(QFileInfo(path).fileName()));
+}
+
+void PlaylistDock::onOpenPlaylist() {
+    QString path = QFileDialog::getOpenFileName(this, "Open playlist", "",
+                                                "Playlists (*.json *.m3u *.m3u8)");
+    if (path.isEmpty()) return;
+    if (loadPlaylistFile(path)) {
+        addOrSelectSaved(path);
+        setStatus(QStringLiteral("Opened: %1").arg(QFileInfo(path).fileName()));
+    }
+}
+
+void PlaylistDock::onRenamePlaylist() {
+    int idx = playlistCombo_->currentIndex();
+    if (idx < 0) return;
+    QString oldPath = playlistCombo_->itemData(idx).toString();
+    if (oldPath.isEmpty()) return;
+    QFileInfo fi(oldPath);
+    bool ok = false;
+    QString newBase = QInputDialog::getText(this, "Rename playlist", "New name:",
+                                            QLineEdit::Normal, fi.completeBaseName(), &ok);
+    if (!ok || newBase.isEmpty()) return;
+    QString newPath = fi.absolutePath() + "/" + newBase + "." + fi.suffix();
+    if (QFile::exists(newPath)) {
+        setStatus("A file with that name already exists.", true);
+        return;
+    }
+    if (!QFile::rename(oldPath, newPath)) {
+        setStatus("Rename failed.", true);
+        return;
+    }
+    loadingCombo_ = true;
+    playlistCombo_->setItemText(idx, QFileInfo(newPath).completeBaseName());
+    playlistCombo_->setItemData(idx, newPath);
+    loadingCombo_ = false;
+    setStatus(QStringLiteral("Renamed to: %1").arg(QFileInfo(newPath).fileName()));
+}
+
+void PlaylistDock::onRemoveSaved() {
+    int idx = playlistCombo_->currentIndex();
+    if (idx < 0) return;
+    loadingCombo_ = true;
+    playlistCombo_->removeItem(idx);
+    loadingCombo_ = false;
+    setStatus("Removed from list (file kept on disk).");
 }
 
 void PlaylistDock::setStatus(const QString& msg, bool error) {
     status_->setStyleSheet(error ? "color:#e06c75;" : "");
     status_->setText(msg);
+}
+
+// ---- Settings persistence (mode + bound source) --------------------------
+
+QString PlaylistDock::settingsPath() const {
+    char* p = obs_module_config_path("settings.json");
+    QString s = p ? QString::fromUtf8(p) : QString();
+    bfree(p);
+    if (!s.isEmpty()) QDir().mkpath(QFileInfo(s).absolutePath());
+    return s;
+}
+
+void PlaylistDock::saveSettings() const {
+    QString path = settingsPath();
+    if (path.isEmpty()) return;
+    QJsonObject o;
+    o["mode"] = static_cast<int>(mode_);
+    o["source"] = sourceCombo_ ? sourceCombo_->currentText() : QString();
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
+        f.close();
+    }
+}
+
+void PlaylistDock::loadSettings() {
+    QString path = settingsPath();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    f.close();
+    if (!doc.isObject()) return;
+    QJsonObject o = doc.object();
+    int m = o.value("mode").toInt(static_cast<int>(PlayNext));
+    if (m >= PlayNext && m <= StopAtEnd) mode_ = static_cast<EndMode>(m);
+    pendingSource_ = o.value("source").toString();
 }
 
 void PlaylistDock::checkForUpdate() {
@@ -624,4 +630,5 @@ void PlaylistDock::registerHotkeys() {
 void PlaylistDock::unregisterHotkeys() {
     for (auto id : {hkNext_, hkPrev_, hkPlayPause_, hkStop_})
         if (id != OBS_INVALID_HOTKEY_ID) obs_hotkey_unregister(id);
+    hkNext_ = hkPrev_ = hkPlayPause_ = hkStop_ = OBS_INVALID_HOTKEY_ID;
 }

@@ -28,6 +28,11 @@ static void on_frontend_event(enum obs_frontend_event event, void*) {
     case OBS_FRONTEND_EVENT_PROFILE_CHANGED:
         if (g_dock) g_dock->refreshSources();
         break;
+    case OBS_FRONTEND_EVENT_EXIT:
+        // Release libobs resources while libobs is still alive, before Qt tears
+        // the dock down during shutdown.
+        if (g_dock) g_dock->shutdown();
+        break;
     default:
         break;
     }

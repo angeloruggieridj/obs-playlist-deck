@@ -1,6 +1,7 @@
 #pragma once
 #include <QDockWidget>
 #include <QIcon>
+#include <QString>
 #include <obs.h>
 #include "Playlist.hpp"
 #include "MediaSourceController.hpp"
@@ -18,6 +19,10 @@ public:
 
     void refreshSources();
 
+    // Release all libobs resources while libobs is still alive. Called on
+    // OBS_FRONTEND_EVENT_EXIT so we never touch obs during teardown.
+    void shutdown();
+
     // End-of-clip behavior (matches the "On end" combo order).
     enum EndMode { PlayNext = 0, Loop = 1, LoadNext = 2, StopAtEnd = 3 };
 
@@ -34,13 +39,12 @@ private slots:
     void onPrev();
     void onSourceChanged(int index);
     void onSavePlaylist();
-    void onLoadPlaylist();
+    void onOpenPlaylist();
     void onRenamePlaylist();
-    void onDeletePlaylist();
-    void onImport();
-    void onExport();
-    void onMediaEnded();           // invoked (queued) when the bound source ends
-    void captureCurrentDuration(); // reads duration of the now-loaded clip
+    void onRemoveSaved();
+    void onSavedSelected(int index);
+    void onMediaEnded();
+    void captureCurrentDuration();
 
 private:
     void buildUi();
@@ -48,12 +52,15 @@ private:
     QString itemText(int row) const;
     void playIndex(int row);
     void loadIndex(int row);
+    bool loadPlaylistFile(const QString& path);
+    void addOrSelectSaved(const QString& path);
     void setStatus(const QString& msg, bool error = false);
-    std::string configDir() const;
-    void refreshPlaylistCombo();
-    bool wrapEnabled() const { return mode_ == Loop; }
     QIcon tintedIcon(const QString& resource) const;
     void checkForUpdate();
+
+    QString settingsPath() const;
+    void saveSettings() const;
+    void loadSettings();
 
     void registerHotkeys();
     void unregisterHotkeys();
@@ -61,6 +68,9 @@ private:
     pld::Playlist playlist_;
     MediaSourceController controller_;
     EndMode mode_ = PlayNext;
+    QString pendingSource_;   // source name to reselect after refreshSources()
+    bool loadingCombo_ = false;
+    bool obsShutdown_ = false;
 
     QComboBox* sourceCombo_ = nullptr;
     QListWidget* list_ = nullptr;
