@@ -58,6 +58,9 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     controller_.setOnMediaEnded([this]() {
         QMetaObject::invokeMethod(this, "onMediaEnded", Qt::QueuedConnection);
     });
+    controller_.setOnDeactivated([this]() {
+        QMetaObject::invokeMethod(this, "onSourceDeactivated", Qt::QueuedConnection);
+    });
     registerHotkeys();
     checkForUpdate();
 }
@@ -74,6 +77,7 @@ void PlaylistDock::shutdown() {
     obsShutdown_ = true;
     unregisterHotkeys();
     controller_.setOnMediaEnded(nullptr);
+    controller_.setOnDeactivated(nullptr);
     controller_.unbind();
     if (net_) net_->disconnect();
 }
@@ -172,22 +176,20 @@ void PlaylistDock::buildUi() {
     endRow->addWidget(endCombo_, 1);
     col->addLayout(endRow);
 
-    // ---- Saved playlists (session list of user-chosen files) --------------
-    col->addWidget(sectionLabel("Saved playlists"));
-    playlistCombo_ = new QComboBox();
-    playlistCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    playlistCombo_->setMinimumHeight(26);
-    col->addWidget(playlistCombo_);
-
+    // ---- Playlist file ----------------------------------------------------
+    col->addWidget(sectionLabel("Playlist file"));
     auto* plRow = new QHBoxLayout();
     plRow->setSpacing(3);
     auto* saveBtn = mk(":/icons/save.svg", "Save", "Save the playlist to a file you choose");
     auto* openBtn = mk(":/icons/folder-open.svg", "Open", "Open a playlist file (.json / .m3u)");
-    auto* renameBtn = mk(":/icons/pencil.svg", "Rename", "Rename the selected playlist file");
-    auto* removeBtn = mk(":/icons/trash.svg", "Remove", "Remove the selected entry from this list");
-    for (auto* b : {saveBtn, openBtn, renameBtn, removeBtn}) plRow->addWidget(b);
+    for (auto* b : {saveBtn, openBtn}) plRow->addWidget(b);
     plRow->addStretch(1);
     col->addLayout(plRow);
+
+    loadedLabel_ = new QLabel("No playlist loaded");
+    loadedLabel_->setStyleSheet("color: palette(mid);");
+    loadedLabel_->setWordWrap(true);
+    col->addWidget(loadedLabel_);
 
     // ---- Status + version -------------------------------------------------
     status_ = new QLabel("");
@@ -219,14 +221,10 @@ void PlaylistDock::buildUi() {
     connect(nextBtn, &QPushButton::clicked, this, &PlaylistDock::onNext);
     connect(saveBtn, &QPushButton::clicked, this, &PlaylistDock::onSavePlaylist);
     connect(openBtn, &QPushButton::clicked, this, &PlaylistDock::onOpenPlaylist);
-    connect(renameBtn, &QPushButton::clicked, this, &PlaylistDock::onRenamePlaylist);
-    connect(removeBtn, &QPushButton::clicked, this, &PlaylistDock::onRemoveSaved);
     connect(list_, &QListWidget::itemDoubleClicked, this,
             [this](QListWidgetItem*) { onPlaySelected(); });
     connect(sourceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             &PlaylistDock::onSourceChanged);
-    connect(playlistCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            &PlaylistDock::onSavedSelected);
     connect(endCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int i) {
         mode_ = static_cast<EndMode>(i);
         saveSettings();
@@ -258,6 +256,7 @@ void PlaylistDock::rebuildList() {
 }
 
 void PlaylistDock::playIndex(int row) {
+    pendingStageNext_ = false;
     if (!playlist_.setCurrent(row)) return;
     const auto* it = playlist_.current();
     if (!it) return;
@@ -322,16 +321,24 @@ void PlaylistDock::onMediaEnded() {
         if (i >= 0) playIndex(i);
         break;
     }
-    case LoadNext: {
-        int i = playlist_.next(false);
-        if (i >= 0) loadIndex(i);
-        else controller_.stop();
+    case LoadNext:
+        // Hold the finished clip's last frame on program. Defer loading the next
+        // clip until the source leaves program (program -> preview), so the next
+        // clip's first frame never goes live.
+        pendingStageNext_ = true;
+        setStatus("Clip ended — next will load when this source leaves program.");
         break;
-    }
     case StopAtEnd:
         controller_.stop();
         break;
     }
+}
+
+void PlaylistDock::onSourceDeactivated() {
+    if (!pendingStageNext_ || mode_ != LoadNext) return;
+    pendingStageNext_ = false;
+    int i = playlist_.next(false);
+    if (i >= 0) loadIndex(i); // sets next file paused while off-air (in preview)
 }
 
 void PlaylistDock::onAddFiles() {
@@ -446,26 +453,13 @@ bool PlaylistDock::loadPlaylistFile(const QString& path) {
     return true;
 }
 
-void PlaylistDock::addOrSelectSaved(const QString& path) {
-    loadingCombo_ = true;
-    QString name = QFileInfo(path).completeBaseName();
-    int existing = playlistCombo_->findData(path);
-    if (existing < 0) {
-        playlistCombo_->addItem(name, path);
-        existing = playlistCombo_->count() - 1;
-    } else {
-        playlistCombo_->setItemText(existing, name);
+void PlaylistDock::setLoadedPlaylist(const QString& path) {
+    if (path.isEmpty()) {
+        loadedLabel_->setText("No playlist loaded");
+        return;
     }
-    playlistCombo_->setCurrentIndex(existing);
-    loadingCombo_ = false;
-}
-
-void PlaylistDock::onSavedSelected(int index) {
-    if (loadingCombo_ || index < 0) return;
-    QString path = playlistCombo_->itemData(index).toString();
-    if (path.isEmpty()) return;
-    if (loadPlaylistFile(path))
-        setStatus(QStringLiteral("Loaded: %1").arg(playlistCombo_->itemText(index)));
+    loadedLabel_->setText(QStringLiteral("Loaded: %1").arg(QFileInfo(path).fileName()));
+    loadedLabel_->setToolTip(path);
 }
 
 void PlaylistDock::onSavePlaylist() {
@@ -485,7 +479,7 @@ void PlaylistDock::onSavePlaylist() {
     }
     f.write(text.c_str());
     f.close();
-    addOrSelectSaved(path);
+    setLoadedPlaylist(path);
     setStatus(QStringLiteral("Saved: %1").arg(QFileInfo(path).fileName()));
 }
 
@@ -494,44 +488,9 @@ void PlaylistDock::onOpenPlaylist() {
                                                 "Playlists (*.json *.m3u *.m3u8)");
     if (path.isEmpty()) return;
     if (loadPlaylistFile(path)) {
-        addOrSelectSaved(path);
+        setLoadedPlaylist(path);
         setStatus(QStringLiteral("Opened: %1").arg(QFileInfo(path).fileName()));
     }
-}
-
-void PlaylistDock::onRenamePlaylist() {
-    int idx = playlistCombo_->currentIndex();
-    if (idx < 0) return;
-    QString oldPath = playlistCombo_->itemData(idx).toString();
-    if (oldPath.isEmpty()) return;
-    QFileInfo fi(oldPath);
-    bool ok = false;
-    QString newBase = QInputDialog::getText(this, "Rename playlist", "New name:",
-                                            QLineEdit::Normal, fi.completeBaseName(), &ok);
-    if (!ok || newBase.isEmpty()) return;
-    QString newPath = fi.absolutePath() + "/" + newBase + "." + fi.suffix();
-    if (QFile::exists(newPath)) {
-        setStatus("A file with that name already exists.", true);
-        return;
-    }
-    if (!QFile::rename(oldPath, newPath)) {
-        setStatus("Rename failed.", true);
-        return;
-    }
-    loadingCombo_ = true;
-    playlistCombo_->setItemText(idx, QFileInfo(newPath).completeBaseName());
-    playlistCombo_->setItemData(idx, newPath);
-    loadingCombo_ = false;
-    setStatus(QStringLiteral("Renamed to: %1").arg(QFileInfo(newPath).fileName()));
-}
-
-void PlaylistDock::onRemoveSaved() {
-    int idx = playlistCombo_->currentIndex();
-    if (idx < 0) return;
-    loadingCombo_ = true;
-    playlistCombo_->removeItem(idx);
-    loadingCombo_ = false;
-    setStatus("Removed from list (file kept on disk).");
 }
 
 void PlaylistDock::setStatus(const QString& msg, bool error) {

@@ -40,10 +40,8 @@ private slots:
     void onSourceChanged(int index);
     void onSavePlaylist();
     void onOpenPlaylist();
-    void onRenamePlaylist();
-    void onRemoveSaved();
-    void onSavedSelected(int index);
     void onMediaEnded();
+    void onSourceDeactivated();
     void captureCurrentDuration();
 
 private:
@@ -53,7 +51,7 @@ private:
     void playIndex(int row);
     void loadIndex(int row);
     bool loadPlaylistFile(const QString& path);
-    void addOrSelectSaved(const QString& path);
+    void setLoadedPlaylist(const QString& path);
     void setStatus(const QString& msg, bool error = false);
     QIcon tintedIcon(const QString& resource) const;
     void checkForUpdate();
@@ -69,13 +67,13 @@ private:
     MediaSourceController controller_;
     EndMode mode_ = PlayNext;
     QString pendingSource_;   // source name to reselect after refreshSources()
-    bool loadingCombo_ = false;
     bool obsShutdown_ = false;
+    bool pendingStageNext_ = false; // LoadNext: clip ended, waiting for program->preview
 
     QComboBox* sourceCombo_ = nullptr;
     QListWidget* list_ = nullptr;
-    QComboBox* playlistCombo_ = nullptr;
     QComboBox* endCombo_ = nullptr;
+    QLabel* loadedLabel_ = nullptr;
     QLabel* status_ = nullptr;
     QLabel* versionLabel_ = nullptr;
     QNetworkAccessManager* net_ = nullptr;

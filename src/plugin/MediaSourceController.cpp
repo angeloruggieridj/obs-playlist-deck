@@ -28,14 +28,19 @@ void MediaSourceController::bind(const std::string& sourceName) {
     source_ = s; // keep strong ref
     boundName_ = sourceName;
     signal_handler_t* sh = obs_source_get_signal_handler(source_);
-    if (sh) signal_handler_connect(sh, "media_ended", &MediaSourceController::mediaEndedThunk, this);
+    if (sh) {
+        signal_handler_connect(sh, "media_ended", &MediaSourceController::mediaEndedThunk, this);
+        signal_handler_connect(sh, "deactivate", &MediaSourceController::deactivateThunk, this);
+    }
 }
 
 void MediaSourceController::unbind() {
     if (source_) {
         signal_handler_t* sh = obs_source_get_signal_handler(source_);
-        if (sh)
+        if (sh) {
             signal_handler_disconnect(sh, "media_ended", &MediaSourceController::mediaEndedThunk, this);
+            signal_handler_disconnect(sh, "deactivate", &MediaSourceController::deactivateThunk, this);
+        }
         obs_source_release(source_);
         source_ = nullptr;
     }
@@ -96,4 +101,9 @@ void MediaSourceController::restart() {
 void MediaSourceController::mediaEndedThunk(void* data, calldata_t*) {
     auto* self = static_cast<MediaSourceController*>(data);
     if (self && self->onEnded_) self->onEnded_();
+}
+
+void MediaSourceController::deactivateThunk(void* data, calldata_t*) {
+    auto* self = static_cast<MediaSourceController*>(data);
+    if (self && self->onDeactivated_) self->onDeactivated_();
 }

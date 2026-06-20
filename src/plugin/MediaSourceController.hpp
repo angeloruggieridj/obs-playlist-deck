@@ -28,11 +28,16 @@ public:
     void restart();
 
     void setOnMediaEnded(std::function<void()> cb) { onEnded_ = std::move(cb); }
+    // Fires when the bound source leaves the program output (e.g. studio-mode
+    // program -> preview transition).
+    void setOnDeactivated(std::function<void()> cb) { onDeactivated_ = std::move(cb); }
 
 private:
     static void mediaEndedThunk(void* data, calldata_t* cd);
+    static void deactivateThunk(void* data, calldata_t* cd);
 
     obs_source_t* source_ = nullptr; // strong ref while bound
     std::string boundName_;
     std::function<void()> onEnded_;
+    std::function<void()> onDeactivated_;
 };
