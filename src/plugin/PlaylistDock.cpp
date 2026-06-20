@@ -3,6 +3,7 @@
 #include "MediaPath.hpp"
 #include "MediaProbe.hpp"
 #include "Format.hpp"
+#include "Version.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -15,18 +16,37 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QStyle>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QPainter>
+#include <QPalette>
+#include <QPixmap>
+#include <QSvgRenderer>
 #include <QTimer>
 #include <QToolButton>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include <utility>
 
+#ifndef PLD_VERSION
+#define PLD_VERSION "0.0.0"
+#endif
+
 using namespace pld;
+
+namespace {
+const char* kReleasesUrl = "https://github.com/angeloruggieridj/obs-playlist-deck/releases";
+const char* kLatestApi =
+    "https://api.github.com/repos/angeloruggieridj/obs-playlist-deck/releases/latest";
+}
 
 PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     setWindowTitle(QString::fromUtf8(obs_module_text("PlaylistDeck")));
@@ -38,6 +58,7 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
         QMetaObject::invokeMethod(this, "onMediaEnded", Qt::QueuedConnection);
     });
     registerHotkeys();
+    checkForUpdate();
 }
 
 PlaylistDock::~PlaylistDock() {
@@ -46,88 +67,142 @@ PlaylistDock::~PlaylistDock() {
     controller_.unbind();
 }
 
+QIcon PlaylistDock::tintedIcon(const QString& resource) const {
+    QSvgRenderer renderer(resource);
+    const int logical = 16;
+    const qreal dpr = devicePixelRatioF();
+    QPixmap pm(static_cast<int>(logical * dpr), static_cast<int>(logical * dpr));
+    pm.fill(Qt::transparent);
+    {
+        QPainter p(&pm);
+        renderer.render(&p);
+    }
+    // Tint the rendered shape with the current theme's button text color.
+    QColor c = palette().color(QPalette::ButtonText);
+    {
+        QPainter p(&pm);
+        p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        p.fillRect(pm.rect(), c);
+    }
+    pm.setDevicePixelRatio(dpr);
+    return QIcon(pm);
+}
+
 void PlaylistDock::buildUi() {
     auto* root = new QWidget(this);
     auto* col = new QVBoxLayout(root);
-    col->setContentsMargins(4, 4, 4, 4);
-    col->setSpacing(4);
+    col->setContentsMargins(6, 6, 6, 6);
+    col->setSpacing(5);
 
-    // Helper: compact icon tool button with a tooltip.
-    auto mk = [this](QStyle::StandardPixmap sp, const QString& tip) {
+    auto sectionLabel = [](const QString& text) {
+        auto* l = new QLabel(text);
+        QFont f = l->font();
+        f.setBold(true);
+        l->setFont(f);
+        return l;
+    };
+
+    // Text + icon button.
+    auto mk = [this](const QString& icon, const QString& text, const QString& tip) {
         auto* b = new QToolButton();
-        b->setIcon(style()->standardIcon(sp));
+        b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        b->setIcon(tintedIcon(icon));
+        b->setText(text);
         b->setToolTip(tip);
-        b->setAutoRaise(true);
         b->setFocusPolicy(Qt::NoFocus);
         return b;
     };
 
-    // Source dropdown gets a full-width row of its own.
+    // ---- Media source -----------------------------------------------------
+    col->addWidget(sectionLabel("Media source"));
     sourceCombo_ = new QComboBox();
     sourceCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    auto* refreshBtn = mk(QStyle::SP_BrowserReload, "Refresh source list");
+    sourceCombo_->setMinimumHeight(26);
+    auto* refreshBtn = mk(":/icons/refresh.svg", "Refresh", "Rescan media sources in the current setup");
     auto* srcRow = new QHBoxLayout();
     srcRow->addWidget(sourceCombo_, 1);
     srcRow->addWidget(refreshBtn);
     col->addLayout(srcRow);
 
+    // ---- Playlist ---------------------------------------------------------
+    col->addWidget(sectionLabel("Playlist"));
     list_ = new QListWidget();
     list_->setSelectionMode(QAbstractItemView::SingleSelection);
     col->addWidget(list_, 1);
 
-    // Item operations (icons only).
-    auto* addBtn = mk(QStyle::SP_DialogOpenButton, "Add media files");
-    auto* rmBtn = mk(QStyle::SP_TrashIcon, "Remove selected");
-    auto* upBtn = mk(QStyle::SP_ArrowUp, "Move up");
-    auto* downBtn = mk(QStyle::SP_ArrowDown, "Move down");
-    auto* clrBtn = mk(QStyle::SP_DialogResetButton, "Clear playlist");
     auto* opsRow = new QHBoxLayout();
-    opsRow->setSpacing(2);
+    opsRow->setSpacing(3);
+    auto* addBtn = mk(":/icons/plus.svg", "Add", "Add media files");
+    auto* rmBtn = mk(":/icons/minus.svg", "Remove", "Remove selected item");
+    auto* upBtn = mk(":/icons/chevron-up.svg", "Up", "Move selected item up");
+    auto* downBtn = mk(":/icons/chevron-down.svg", "Down", "Move selected item down");
+    auto* clrBtn = mk(":/icons/x.svg", "Clear", "Clear the playlist");
     for (auto* b : {addBtn, rmBtn, upBtn, downBtn, clrBtn}) opsRow->addWidget(b);
     opsRow->addStretch(1);
     col->addLayout(opsRow);
 
-    // Transport (icons only).
-    auto* playSelBtn = mk(QStyle::SP_MediaPlay, "Play selected");
-    auto* prevBtn = mk(QStyle::SP_MediaSkipBackward, "Previous");
-    auto* playPauseBtn = mk(QStyle::SP_MediaPause, "Play / Pause bound source");
-    auto* stopBtn = mk(QStyle::SP_MediaStop, "Stop");
-    auto* nextBtn = mk(QStyle::SP_MediaSkipForward, "Next");
     auto* trRow = new QHBoxLayout();
-    trRow->setSpacing(2);
+    trRow->setSpacing(3);
+    auto* playSelBtn = mk(":/icons/play.svg", "Play", "Play the selected item");
+    auto* prevBtn = mk(":/icons/skip-back.svg", "Prev", "Previous item");
+    auto* playPauseBtn = mk(":/icons/pause.svg", "Pause", "Play / pause the bound source");
+    auto* stopBtn = mk(":/icons/stop.svg", "Stop", "Stop playback");
+    auto* nextBtn = mk(":/icons/skip-forward.svg", "Next", "Next item");
     for (auto* b : {playSelBtn, prevBtn, playPauseBtn, stopBtn, nextBtn}) trRow->addWidget(b);
     trRow->addStretch(1);
     col->addLayout(trRow);
 
-    // End-of-clip behavior.
+    auto* endRow = new QHBoxLayout();
+    endRow->addWidget(new QLabel("On end:"));
     endCombo_ = new QComboBox();
-    endCombo_->addItem("On end: Play next");
-    endCombo_->addItem("On end: Loop");
-    endCombo_->addItem("On end: Load next (paused)");
-    endCombo_->addItem("On end: Stop");
+    endCombo_->addItem("Play next");
+    endCombo_->addItem("Loop");
+    endCombo_->addItem("Load next (paused)");
+    endCombo_->addItem("Stop");
     endCombo_->setCurrentIndex(static_cast<int>(mode_));
-    col->addWidget(endCombo_);
+    endCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    endRow->addWidget(endCombo_, 1);
+    col->addLayout(endRow);
 
-    // Saved playlists: combo full-width, then icon actions.
+    // ---- Saved playlists --------------------------------------------------
+    col->addWidget(sectionLabel("Saved playlists"));
     playlistCombo_ = new QComboBox();
     playlistCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    playlistCombo_->setMinimumHeight(26);
     col->addWidget(playlistCombo_);
 
-    auto* saveBtn = mk(QStyle::SP_DialogSaveButton, "Save current as new playlist");
-    auto* loadBtn = mk(QStyle::SP_DialogYesButton, "Load selected playlist");
-    auto* renameBtn = mk(QStyle::SP_FileDialogDetailedView, "Rename selected playlist");
-    auto* delBtn = mk(QStyle::SP_DialogDiscardButton, "Delete selected playlist");
-    auto* impBtn = mk(QStyle::SP_ArrowDown, "Import playlist from file (.json/.m3u)");
-    auto* expBtn = mk(QStyle::SP_ArrowUp, "Export playlist to file (.json/.m3u)");
     auto* plRow = new QHBoxLayout();
-    plRow->setSpacing(2);
-    for (auto* b : {saveBtn, loadBtn, renameBtn, delBtn, impBtn, expBtn}) plRow->addWidget(b);
+    plRow->setSpacing(3);
+    auto* saveBtn = mk(":/icons/save.svg", "Save", "Save current playlist with a new name");
+    auto* loadBtn = mk(":/icons/folder-open.svg", "Load", "Load the selected saved playlist");
+    auto* renameBtn = mk(":/icons/pencil.svg", "Rename", "Rename the selected saved playlist");
+    auto* delBtn = mk(":/icons/trash.svg", "Delete", "Delete the selected saved playlist");
+    for (auto* b : {saveBtn, loadBtn, renameBtn, delBtn}) plRow->addWidget(b);
     plRow->addStretch(1);
     col->addLayout(plRow);
 
+    auto* ioRow = new QHBoxLayout();
+    ioRow->setSpacing(3);
+    auto* impBtn = mk(":/icons/download.svg", "Import", "Import a playlist file (.json / .m3u)");
+    auto* expBtn = mk(":/icons/upload.svg", "Export", "Export the playlist to a file (.json / .m3u)");
+    for (auto* b : {impBtn, expBtn}) ioRow->addWidget(b);
+    ioRow->addStretch(1);
+    col->addLayout(ioRow);
+
+    // ---- Status + version -------------------------------------------------
     status_ = new QLabel("");
     status_->setWordWrap(true);
     col->addWidget(status_);
+
+    versionLabel_ = new QLabel(QStringLiteral("v%1").arg(PLD_VERSION));
+    versionLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    versionLabel_->setTextFormat(Qt::RichText);
+    versionLabel_->setOpenExternalLinks(true);
+    versionLabel_->setStyleSheet("color: palette(mid);");
+    auto* verRow = new QHBoxLayout();
+    verRow->addStretch(1);
+    verRow->addWidget(versionLabel_);
+    col->addLayout(verRow);
 
     setWidget(root);
 
@@ -156,21 +231,22 @@ void PlaylistDock::buildUi() {
             [this](int i) { mode_ = static_cast<EndMode>(i); });
 }
 
-QString PlaylistDock::itemLabel(int row) const {
+QString PlaylistDock::itemText(int row) const {
     const auto& it = playlist_.items()[row];
     QString label = QString::fromStdString(it.title);
     std::string dur = formatDuration(it.durationMs);
     if (!dur.empty()) label += QStringLiteral(" (%1)").arg(QString::fromStdString(dur));
-    if (row == playlist_.currentIndex()) label = QStringLiteral("\xE2\x96\xB6 ") + label; // ▶
     return label;
 }
 
 void PlaylistDock::rebuildList() {
     int sel = list_->currentRow();
     list_->clear();
+    QIcon playing = tintedIcon(":/icons/play.svg");
     for (int i = 0; i < playlist_.size(); ++i) {
-        auto* item = new QListWidgetItem(itemLabel(i));
+        auto* item = new QListWidgetItem(itemText(i));
         item->setToolTip(QString::fromStdString(playlist_.items()[i].path));
+        if (i == playlist_.currentIndex()) item->setIcon(playing);
         list_->addItem(item);
     }
     if (playlist_.currentIndex() >= 0)
@@ -208,6 +284,11 @@ void PlaylistDock::loadIndex(int row) {
     }
     if (controller_.setFileLoadOnly(it->path)) {
         setStatus(QStringLiteral("Loaded (paused): %1").arg(QString::fromStdString(it->title)));
+        // The media source starts decoding asynchronously; re-issue the pause a
+        // few times so it reliably stays paused on the first frame even though
+        // the scene is live in program.
+        QTimer::singleShot(120, this, [this]() { controller_.pause(); });
+        QTimer::singleShot(400, this, [this]() { controller_.pause(); });
         QTimer::singleShot(700, this, &PlaylistDock::captureCurrentDuration);
     } else {
         setStatus("Failed to set media source.", true);
@@ -221,7 +302,6 @@ void PlaylistDock::captureCurrentDuration() {
     if (playlist_.items()[row].durationMs >= 0) return; // already known
     long long d = controller_.currentDurationMs();
     if (d < 0) return;
-    // setItems is the only mutator that touches durations; rebuild a copy.
     auto items = playlist_.items();
     items[row].durationMs = d;
     int cur = playlist_.currentIndex();
@@ -303,7 +383,6 @@ void PlaylistDock::onPlaySelected() {
     if (r >= 0) playIndex(r);
 }
 
-void PlaylistDock::onPlay() { controller_.play(); }
 void PlaylistDock::onTogglePlayPause() { controller_.togglePlayPause(); }
 void PlaylistDock::onStop() { controller_.stop(); }
 
@@ -413,7 +492,7 @@ void PlaylistDock::onRenamePlaylist() {
         setStatus("Rename failed.", true);
         return;
     }
-    // Keep the stored "name" field in sync with the file name.
+    // Keep the stored "name" field in sync with the new file name.
     QFile f(newPath);
     if (f.open(QIODevice::ReadOnly)) {
         std::string text = f.readAll().toStdString();
@@ -488,6 +567,28 @@ void PlaylistDock::onExport() {
 void PlaylistDock::setStatus(const QString& msg, bool error) {
     status_->setStyleSheet(error ? "color:#e06c75;" : "");
     status_->setText(msg);
+}
+
+void PlaylistDock::checkForUpdate() {
+    net_ = new QNetworkAccessManager(this);
+    QNetworkRequest req((QUrl(QString::fromUtf8(kLatestApi))));
+    req.setHeader(QNetworkRequest::UserAgentHeader, "obs-playlist-deck");
+    QNetworkReply* reply = net_->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) return;
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        if (!doc.isObject()) return;
+        QString tag = doc.object().value("tag_name").toString();
+        if (tag.isEmpty()) return;
+        if (pld::isNewerVersion(tag.toStdString(), PLD_VERSION)) {
+            versionLabel_->setText(
+                QStringLiteral("v%1 — <a href=\"%2\">update to %3 \xE2\x86\x97</a>")
+                    .arg(PLD_VERSION)
+                    .arg(QString::fromUtf8(kReleasesUrl))
+                    .arg(tag));
+        }
+    });
 }
 
 // ---- Hotkeys -------------------------------------------------------------

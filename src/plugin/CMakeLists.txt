@@ -3,15 +3,17 @@ if(NOT libobs_FOUND)
   find_package(LibObs REQUIRED)
 endif()
 find_package(obs-frontend-api REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Svg Network)
 
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 add_library(obs-playlist-deck MODULE
   plugin-main.cpp
   PlaylistDock.cpp
   MediaSourceController.cpp
   MediaProbe.cpp
+  ${CMAKE_SOURCE_DIR}/resources/icons.qrc
 )
 
 target_link_libraries(obs-playlist-deck PRIVATE
@@ -20,7 +22,11 @@ target_link_libraries(obs-playlist-deck PRIVATE
   OBS::obs-frontend-api
   Qt6::Core
   Qt6::Widgets
+  Qt6::Svg
+  Qt6::Network
 )
+
+target_compile_definitions(obs-playlist-deck PRIVATE PLD_VERSION="${PROJECT_VERSION}")
 
 target_include_directories(obs-playlist-deck PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
