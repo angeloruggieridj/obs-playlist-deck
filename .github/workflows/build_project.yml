@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # weekly (Mon 06:00 UTC) — exercises the compat matrix
 
 permissions:
   contents: write
@@ -328,6 +331,9 @@ jobs:
   compat:
     name: OBS compat ${{ matrix.obs }}
     needs: tests
+    # Heavy (builds old OBS from source); only on demand or the weekly schedule,
+    # not on every push/PR.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     continue-on-error: true
     strategy:
@@ -364,6 +370,7 @@ jobs:
             https://github.com/obsproject/obs-studio.git /tmp/obs
           cmake -B /tmp/obs-build -S /tmp/obs -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
             -DENABLE_PLUGINS=OFF -DENABLE_UI=OFF -DENABLE_SCRIPTING=OFF \
             -DENABLE_BROWSER=OFF -DENABLE_VLC=OFF -DENABLE_WAYLAND=OFF \
             -DENABLE_PIPEWIRE=OFF
