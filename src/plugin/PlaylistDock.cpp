@@ -529,6 +529,18 @@ void PlaylistDock::onPlaySelected() {
 void PlaylistDock::onTogglePlayPause() { controller_.togglePlayPause(); }
 void PlaylistDock::onStop() { controller_.stop(); }
 
+// ---- Remote control (obs-websocket vendor) -------------------------------
+void PlaylistDock::wsNext() { onNext(); }
+void PlaylistDock::wsPrev() { onPrev(); }
+void PlaylistDock::wsStop() { onStop(); }
+void PlaylistDock::wsPlayPause() { onTogglePlayPause(); }
+void PlaylistDock::wsPlayIndex(int index) {
+    if (index >= 0 && index < playlist_.size()) playIndex(index);
+}
+void PlaylistDock::wsLoad(const QString& path) {
+    if (loadPlaylistFile(path)) setLoadedPlaylist(path);
+}
+
 void PlaylistDock::onNext() {
     int i = (mode_ == Shuffle)
                 ? pld::randomIndex(playlist_.size(), playlist_.currentIndex(), rng_)

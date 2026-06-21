@@ -24,6 +24,17 @@ public:
     void refreshSources();
     void shutdown();
 
+    // Remote control entry points (invoked from the obs-websocket vendor API on
+    // the websocket thread via queued connection — keep them invokable).
+    Q_INVOKABLE void wsNext();
+    Q_INVOKABLE void wsPrev();
+    Q_INVOKABLE void wsStop();
+    Q_INVOKABLE void wsPlayPause();
+    Q_INVOKABLE void wsPlayIndex(int index);
+    Q_INVOKABLE void wsLoad(const QString& path);
+    int itemCount() const { return playlist_.size(); }
+    int currentIndex() const { return playlist_.currentIndex(); }
+
     // End-of-clip behavior (matches the "On end" combo order).
     enum EndMode { PlayNext = 0, Loop = 1, LoadNext = 2, StopAtEnd = 3, Shuffle = 4, RepeatOne = 5 };
 
