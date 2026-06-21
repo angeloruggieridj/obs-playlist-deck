@@ -346,8 +346,10 @@ jobs:
             libcurl4-openssl-dev libjansson-dev libmbedtls-dev libsimde-dev \
             uthash-dev nlohmann-json3-dev zlib1g-dev libpng-dev \
             libpipewire-0.3-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev \
-            libxcb1-dev libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shm0-dev \
+            libgles2-mesa-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shm0-dev \
             libxcb-xfixes0-dev libxcb-composite0-dev libxcb-xinput-dev \
+            libxfixes-dev libxcomposite-dev libxinerama-dev libxss-dev \
             libpci-dev libpulse-dev libudev-dev libasound2-dev
       - name: Cache OBS dev
         id: cache-obsdev
