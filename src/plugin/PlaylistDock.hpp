@@ -69,6 +69,8 @@ private:
     QString settingsPath() const;
     void saveSettings() const;
     void loadSettings();
+    void applyLocale();              // sets the module locale from language_
+    void applyLocaleAndRebuild();    // applyLocale() + rebuild the UI in the new language
     QString sessionPath() const;
     void saveSession() const;
     void loadSession();
@@ -84,6 +86,8 @@ private:
     bool pendingStageNext_ = false;
     bool enableProbe_ = true;
     bool autoRestore_ = false;
+    QString language_ = "auto"; // "auto" (follow OBS) | "en-US" | "it-IT"
+    QString loadedPath_;        // currently loaded playlist file, for label restore
     std::mt19937 rng_{std::random_device{}()};
 
     QComboBox* sourceCombo_ = nullptr;
