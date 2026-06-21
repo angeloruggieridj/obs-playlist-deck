@@ -12,14 +12,20 @@
 
 #include <QAbstractItemView>
 #include <QBrush>
+#include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
+#include <QCoreApplication>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QPointer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -40,6 +46,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <thread>
 #include <utility>
 
 #ifndef PLD_VERSION
@@ -60,6 +67,7 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     loadSettings();
     buildUi();
     refreshSources();
+    if (autoRestore_) loadSession();
     controller_.setOnMediaEnded([this]() {
         QMetaObject::invokeMethod(this, "onMediaEnded", Qt::QueuedConnection);
     });
@@ -226,12 +234,16 @@ void PlaylistDock::buildUi() {
     versionLabel_->setTextFormat(Qt::RichText);
     versionLabel_->setOpenExternalLinks(true);
     versionLabel_->setToolTip("Installed Playlist Deck version");
+    auto* settingsBtn = mk(":/icons/settings.svg", "Settings", "Open Playlist Deck settings");
     auto* verRow = new QHBoxLayout();
+    verRow->addWidget(settingsBtn);
     verRow->addStretch(1);
     verRow->addWidget(versionLabel_);
     col->addLayout(verRow);
 
     setWidget(root);
+
+    connect(settingsBtn, &QPushButton::clicked, this, &PlaylistDock::onOpenSettings);
 
     connect(refreshBtn, &QPushButton::clicked, this, &PlaylistDock::refreshSources);
     connect(addBtn, &QPushButton::clicked, this, &PlaylistDock::onAddFiles);
@@ -292,6 +304,7 @@ void PlaylistDock::rebuildList() {
         list_->setCurrentRow(sel);
     list_->blockSignals(false);
     applyFilter();
+    if (autoRestore_) saveSession();
 }
 
 void PlaylistDock::applyFilter() {
@@ -402,16 +415,50 @@ void PlaylistDock::onSourceDeactivated() {
 }
 
 void PlaylistDock::addPaths(const QStringList& paths) {
-    int added = 0;
+    QStringList added;
     for (const auto& f : paths) {
         std::string p = f.toStdString();
         if (!mediapath::isMediaFile(p)) continue;
-        PlaylistItem it{p, mediapath::fileStem(p), pld::probeDurationMs(p)};
-        playlist_.add(it);
-        ++added;
+        playlist_.add(PlaylistItem{p, mediapath::fileStem(p), -1}); // duration probed async
+        added << f;
     }
     rebuildList();
-    if (added) setStatus(QStringLiteral("Added %1 file(s).").arg(added));
+    if (!added.isEmpty()) {
+        setStatus(QStringLiteral("Added %1 file(s).").arg(added.size()));
+        startBackgroundProbe(added);
+    }
+}
+
+void PlaylistDock::startBackgroundProbe(const QStringList& paths) {
+    if (!enableProbe_) return;
+    QPointer<PlaylistDock> self(this);
+    std::thread([self, paths]() {
+        for (const QString& path : paths) {
+            long long d = pld::probeDurationMs(path.toStdString());
+            if (d < 0) continue;
+            QString p = path;
+            QMetaObject::invokeMethod(
+                qApp, [self, p, d]() { if (self) self->applyProbedDuration(p, d); },
+                Qt::QueuedConnection);
+        }
+    }).detach();
+}
+
+void PlaylistDock::applyProbedDuration(const QString& path, long long durationMs) {
+    if (durationMs < 0) return;
+    std::string p = path.toStdString();
+    auto items = playlist_.items();
+    bool changed = false;
+    for (auto& it : items)
+        if (it.path == p && it.durationMs < 0) {
+            it.durationMs = durationMs;
+            changed = true;
+        }
+    if (!changed) return;
+    int cur = playlist_.currentIndex();
+    playlist_.setItems(std::move(items));
+    playlist_.setCurrent(cur);
+    rebuildList();
 }
 
 void PlaylistDock::onAddFiles() {
@@ -552,10 +599,12 @@ bool PlaylistDock::loadPlaylistFile(const QString& path) {
     } else {
         items = io::parseM3u(text);
     }
-    for (auto& it : items)
-        if (it.durationMs < 0) it.durationMs = pld::probeDurationMs(it.path);
+    QStringList toProbe;
+    for (const auto& it : items)
+        if (it.durationMs < 0) toProbe << QString::fromStdString(it.path);
     playlist_.setItems(std::move(items));
     rebuildList();
+    startBackgroundProbe(toProbe);
     return true;
 }
 
@@ -620,6 +669,8 @@ void PlaylistDock::saveSettings() const {
     QJsonObject o;
     o["mode"] = static_cast<int>(mode_);
     o["source"] = sourceCombo_ ? sourceCombo_->currentText() : QString();
+    o["enableProbe"] = enableProbe_;
+    o["autoRestore"] = autoRestore_;
     QFile f(path);
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
@@ -638,6 +689,70 @@ void PlaylistDock::loadSettings() {
     int m = o.value("mode").toInt(static_cast<int>(PlayNext));
     if (m >= PlayNext && m <= RepeatOne) mode_ = static_cast<EndMode>(m);
     pendingSource_ = o.value("source").toString();
+    enableProbe_ = o.value("enableProbe").toBool(true);
+    autoRestore_ = o.value("autoRestore").toBool(false);
+}
+
+QString PlaylistDock::sessionPath() const {
+    char* p = obs_module_config_path("session.json");
+    QString s = p ? QString::fromUtf8(p) : QString();
+    bfree(p);
+    if (!s.isEmpty()) QDir().mkpath(QFileInfo(s).absolutePath());
+    return s;
+}
+
+void PlaylistDock::saveSession() const {
+    QString path = sessionPath();
+    if (path.isEmpty()) return;
+    std::string text = io::toJson("session", playlist_.items());
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(text.c_str());
+        f.close();
+    }
+}
+
+void PlaylistDock::loadSession() {
+    QString path = sessionPath();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    std::string text = f.readAll().toStdString();
+    f.close();
+    std::string n;
+    std::vector<PlaylistItem> items;
+    if (!io::fromJson(text, n, items)) return;
+    QStringList toProbe;
+    for (const auto& it : items)
+        if (it.durationMs < 0) toProbe << QString::fromStdString(it.path);
+    playlist_.setItems(std::move(items));
+    rebuildList();
+    startBackgroundProbe(toProbe);
+}
+
+void PlaylistDock::onOpenSettings() {
+    QDialog dlg(this);
+    dlg.setWindowTitle("Playlist Deck — Settings");
+    auto* form = new QFormLayout(&dlg);
+
+    auto* probeChk = new QCheckBox("Probe media durations (background)");
+    probeChk->setChecked(enableProbe_);
+    form->addRow(probeChk);
+
+    auto* restoreChk = new QCheckBox("Restore last playlist on startup");
+    restoreChk->setChecked(autoRestore_);
+    form->addRow(restoreChk);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+    if (dlg.exec() != QDialog::Accepted) return;
+    enableProbe_ = probeChk->isChecked();
+    autoRestore_ = restoreChk->isChecked();
+    saveSettings();
+    if (autoRestore_) saveSession(); // capture current immediately
+    setStatus("Settings saved.");
 }
 
 void PlaylistDock::checkForUpdate() {

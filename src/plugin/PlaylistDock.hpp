@@ -47,6 +47,8 @@ private slots:
     void onListReordered();
     void onFilterChanged(const QString& text);
     void onTick();
+    void onOpenSettings();
+    void applyProbedDuration(const QString& path, long long durationMs);
     void captureCurrentDuration();
 
 private:
@@ -62,10 +64,14 @@ private:
     void setStatus(const QString& msg, bool error = false);
     QIcon tintedIcon(const QString& resource) const;
     void checkForUpdate();
+    void startBackgroundProbe(const QStringList& paths);
 
     QString settingsPath() const;
     void saveSettings() const;
     void loadSettings();
+    QString sessionPath() const;
+    void saveSession() const;
+    void loadSession();
 
     void registerHotkeys();
     void unregisterHotkeys();
@@ -76,6 +82,8 @@ private:
     QString pendingSource_;
     bool obsShutdown_ = false;
     bool pendingStageNext_ = false;
+    bool enableProbe_ = true;
+    bool autoRestore_ = false;
     std::mt19937 rng_{std::random_device{}()};
 
     QComboBox* sourceCombo_ = nullptr;
