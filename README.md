@@ -123,7 +123,7 @@ live in [`data/locale/`](data/locale/) (`en-US.ini` is the canonical key set).
 
 | | |
 |---|---|
-| **OBS Studio** | **31.0+** (CI-certified). Built/tested against **32.1.2**. Uses `obs_frontend_add_custom_qdock` (OBS 30.0+), so 30.x is expected to work but is not CI-verified. |
+| **OBS Studio** | **31.0+** (CI-certified). Built and tested against **32.1.2**. |
 | **Platforms** | Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon) |
 | **Qt** | Qt 6 |
 
