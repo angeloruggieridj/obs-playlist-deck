@@ -339,7 +339,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        obs: ["30.2.3", "31.0.0"]
+        # OBS 30.x can't be CI-built on current runners (OBS-30 source vs the
+        # runner's FFmpeg, and dev-install layout differences) — not a plugin
+        # issue. The plugin's API needs (obs_frontend_add_custom_qdock) exist
+        # since OBS 30.0, but 31.0.0 is the CI-certified minimum.
+        obs: ["31.0.0"]
     steps:
       - uses: actions/checkout@v6
       - name: Install build deps
@@ -382,13 +386,15 @@ jobs:
             -DCMAKE_PREFIX_PATH="/tmp/obs-dev;/usr"
           cmake --build build
 
+  # Stream Deck companion packaging: installable zip + Elgato .streamDeckPlugin,
+  # published as public release assets.
   streamdeck:
     name: Stream Deck companion
     needs: tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
-      - name: Render icons + package
+      - name: Render icons
         run: |
           sudo apt-get update && sudo apt-get install -y librsvg2-bin zip
           cd "streamdeck/com.angeloruggieridj.playlist-deck.sdPlugin/icons"
@@ -397,12 +403,22 @@ jobs:
             rsvg-convert -w 72  -h 72  "$f" -o "$n.png"
             rsvg-convert -w 144 -h 144 "$f" -o "$n@2x.png"
           done
+      - name: Package .sdPlugin (zip)
+        run: |
           cd "${{ github.workspace }}/streamdeck"
           zip -r "${{ github.workspace }}/obs-playlist-deck-streamdeck.zip" com.angeloruggieridj.playlist-deck.sdPlugin
+      - name: Package .streamDeckPlugin (Elgato CLI)
+        run: |
+          npm install -g @elgato/cli >/dev/null 2>&1 || true
+          cd "${{ github.workspace }}/streamdeck"
+          streamdeck pack com.angeloruggieridj.playlist-deck.sdPlugin --output "${{ github.workspace }}" || \
+            echo "streamdeck pack unavailable/failed; zip artifact still produced"
       - uses: actions/upload-artifact@v7
         with:
           name: obs-playlist-deck-streamdeck
-          path: obs-playlist-deck-streamdeck.zip
+          path: |
+            obs-playlist-deck-streamdeck.zip
+            *.streamDeckPlugin
 
   release:
     name: GitHub Release
@@ -430,3 +446,4 @@ jobs:
             release-assets/obs-playlist-deck-windows.zip
             release-assets/obs-playlist-deck-macos-universal.tar.gz
             release-assets/obs-playlist-deck-streamdeck.zip
+            release-assets/*.streamDeckPlugin
