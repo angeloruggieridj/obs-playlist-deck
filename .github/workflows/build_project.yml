@@ -64,7 +64,7 @@ jobs:
       # --- Qt (cached) ---
       - name: Cache Qt
         id: cache-qt
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: C:\Qt
           key: qt-${{ env.QT_WIN_VERSION }}-${{ env.QT_WIN_ARCH }}-v1
@@ -84,7 +84,7 @@ jobs:
       # --- OBS prebuilt deps (cached) ---
       - name: Cache obs-deps
         id: cache-deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: C:\obs-deps
           key: obsdeps-win-x64-v1
@@ -112,7 +112,7 @@ jobs:
       # valid across runs (deps/Qt are also at fixed C:\ paths).
       - name: Cache OBS dev
         id: cache-obsdev
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: C:\obs-dev
           key: obsdev-win-${{ env.OBS_VERSION }}-v1
@@ -172,7 +172,7 @@ jobs:
       # --- OBS prebuilt universal deps (cached) ---
       - name: Cache obs-deps
         id: cache-deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             /tmp/obs-deps
@@ -195,7 +195,7 @@ jobs:
       # the cache stays valid across runs (deps are also at fixed /tmp paths).
       - name: Cache OBS dev
         id: cache-obsdev
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/obs-dev
           key: obsdev-mac-universal-${{ env.OBS_VERSION }}-v1
@@ -353,7 +353,7 @@ jobs:
             libpci-dev libpulse-dev libudev-dev libasound2-dev
       - name: Cache OBS dev
         id: cache-obsdev
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/obs-dev
           key: obsdev-linux-${{ matrix.obs }}-v1
