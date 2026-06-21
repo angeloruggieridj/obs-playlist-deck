@@ -339,7 +339,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        obs: ["30.0.0", "31.0.0"]
+        obs: ["30.2.3", "31.0.0"]
     steps:
       - uses: actions/checkout@v6
       - name: Install build deps
