@@ -78,6 +78,16 @@ long long MediaSourceController::currentDurationMs() const {
     return d > 0 ? static_cast<long long>(d) : -1;
 }
 
+long long MediaSourceController::currentTimeMs() const {
+    if (!source_) return -1;
+    int64_t t = obs_source_media_get_time(source_);
+    return t >= 0 ? static_cast<long long>(t) : -1;
+}
+
+bool MediaSourceController::isPlaying() const {
+    return source_ && obs_source_media_get_state(source_) == OBS_MEDIA_STATE_PLAYING;
+}
+
 void MediaSourceController::play() {
     if (source_) obs_source_media_play_pause(source_, false);
 }

@@ -4,11 +4,15 @@
 #include "MediaProbe.hpp"
 #include "Format.hpp"
 #include "Version.hpp"
+#include "Shuffle.hpp"
+#include "PlaylistListWidget.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
 
 #include <QAbstractItemView>
+#include <QBrush>
+#include <QColor>
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
@@ -27,6 +31,7 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSvgRenderer>
 #include <QTimer>
@@ -63,6 +68,11 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     });
     registerHotkeys();
     checkForUpdate();
+
+    uiTimer_ = new QTimer(this);
+    uiTimer_->setInterval(500);
+    connect(uiTimer_, &QTimer::timeout, this, &PlaylistDock::onTick);
+    uiTimer_->start();
 }
 
 PlaylistDock::~PlaylistDock() {
@@ -138,8 +148,11 @@ void PlaylistDock::buildUi() {
 
     // ---- Playlist ---------------------------------------------------------
     col->addWidget(sectionLabel("Playlist"));
-    list_ = new QListWidget();
-    list_->setSelectionMode(QAbstractItemView::SingleSelection);
+    filterEdit_ = new QLineEdit();
+    filterEdit_->setClearButtonEnabled(true);
+    filterEdit_->setPlaceholderText("Filter…");
+    col->addWidget(filterEdit_);
+    list_ = new PlaylistListWidget();
     col->addWidget(list_, 1);
 
     auto* opsRow = new QHBoxLayout();
@@ -171,10 +184,23 @@ void PlaylistDock::buildUi() {
     endCombo_->addItem("Loop");
     endCombo_->addItem("Load next (paused)");
     endCombo_->addItem("Stop");
+    endCombo_->addItem("Shuffle");
+    endCombo_->addItem("Repeat one");
     endCombo_->setCurrentIndex(static_cast<int>(mode_));
     endCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     endRow->addWidget(endCombo_, 1);
     col->addLayout(endRow);
+
+    // ---- Now playing progress --------------------------------------------
+    progress_ = new QProgressBar();
+    progress_->setRange(0, 1000);
+    progress_->setValue(0);
+    progress_->setTextVisible(false);
+    progress_->setFixedHeight(6);
+    col->addWidget(progress_);
+    timeLabel_ = new QLabel("");
+    timeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    col->addWidget(timeLabel_);
 
     // ---- Playlist file ----------------------------------------------------
     col->addWidget(sectionLabel("Playlist file"));
@@ -222,6 +248,9 @@ void PlaylistDock::buildUi() {
     connect(openBtn, &QPushButton::clicked, this, &PlaylistDock::onOpenPlaylist);
     connect(list_, &QListWidget::itemDoubleClicked, this,
             [this](QListWidgetItem*) { onPlaySelected(); });
+    connect(list_, &PlaylistListWidget::filesDropped, this, &PlaylistDock::onFilesDropped);
+    connect(list_, &PlaylistListWidget::reordered, this, &PlaylistDock::onListReordered);
+    connect(filterEdit_, &QLineEdit::textChanged, this, &PlaylistDock::onFilterChanged);
     connect(sourceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             &PlaylistDock::onSourceChanged);
     connect(endCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int i) {
@@ -240,11 +269,20 @@ QString PlaylistDock::itemText(int row) const {
 
 void PlaylistDock::rebuildList() {
     int sel = list_->currentRow();
+    list_->blockSignals(true);
     list_->clear();
     QIcon playing = tintedIcon(":/icons/play.svg");
     for (int i = 0; i < playlist_.size(); ++i) {
+        const auto& pi = playlist_.items()[i];
         auto* item = new QListWidgetItem(itemText(i));
-        item->setToolTip(QString::fromStdString(playlist_.items()[i].path));
+        item->setData(Qt::UserRole, i); // model index, used to sync drag-reorder
+        QString qpath = QString::fromStdString(pi.path);
+        if (!QFileInfo::exists(qpath)) {
+            item->setForeground(QBrush(QColor("#e06c75")));
+            item->setToolTip(qpath + "  (file not found)");
+        } else {
+            item->setToolTip(qpath);
+        }
         if (i == playlist_.currentIndex()) item->setIcon(playing);
         list_->addItem(item);
     }
@@ -252,7 +290,20 @@ void PlaylistDock::rebuildList() {
         list_->setCurrentRow(playlist_.currentIndex());
     else if (sel >= 0 && sel < playlist_.size())
         list_->setCurrentRow(sel);
+    list_->blockSignals(false);
+    applyFilter();
 }
+
+void PlaylistDock::applyFilter() {
+    QString f = filterEdit_ ? filterEdit_->text().trimmed() : QString();
+    for (int row = 0; row < list_->count(); ++row) {
+        auto* item = list_->item(row);
+        bool match = f.isEmpty() || item->text().contains(f, Qt::CaseInsensitive);
+        item->setHidden(!match);
+    }
+}
+
+void PlaylistDock::onFilterChanged(const QString&) { applyFilter(); }
 
 void PlaylistDock::playIndex(int row) {
     pendingStageNext_ = false;
@@ -327,6 +378,16 @@ void PlaylistDock::onMediaEnded() {
         pendingStageNext_ = true;
         setStatus("Clip ended — next will load when this source leaves program.");
         break;
+    case Shuffle: {
+        int i = pld::randomIndex(playlist_.size(), playlist_.currentIndex(), rng_);
+        if (i >= 0) playIndex(i);
+        break;
+    }
+    case RepeatOne: {
+        int i = playlist_.currentIndex();
+        if (i >= 0) playIndex(i);
+        break;
+    }
     case StopAtEnd:
         controller_.stop();
         break;
@@ -340,10 +401,9 @@ void PlaylistDock::onSourceDeactivated() {
     if (i >= 0) loadIndex(i); // sets next file paused while off-air (in preview)
 }
 
-void PlaylistDock::onAddFiles() {
-    QStringList files = QFileDialog::getOpenFileNames(this, "Add media files");
+void PlaylistDock::addPaths(const QStringList& paths) {
     int added = 0;
-    for (const auto& f : files) {
+    for (const auto& f : paths) {
         std::string p = f.toStdString();
         if (!mediapath::isMediaFile(p)) continue;
         PlaylistItem it{p, mediapath::fileStem(p), pld::probeDurationMs(p)};
@@ -352,6 +412,33 @@ void PlaylistDock::onAddFiles() {
     }
     rebuildList();
     if (added) setStatus(QStringLiteral("Added %1 file(s).").arg(added));
+}
+
+void PlaylistDock::onAddFiles() {
+    addPaths(QFileDialog::getOpenFileNames(this, "Add media files"));
+}
+
+void PlaylistDock::onFilesDropped(const QStringList& paths) { addPaths(paths); }
+
+void PlaylistDock::onListReordered() {
+    // The widget rows were reordered by drag; rebuild the model from the new
+    // order using each item's stored original index.
+    std::vector<PlaylistItem> reordered;
+    reordered.reserve(playlist_.size());
+    int newCurrent = -1;
+    for (int row = 0; row < list_->count(); ++row) {
+        int orig = list_->item(row)->data(Qt::UserRole).toInt();
+        if (orig < 0 || orig >= playlist_.size()) continue;
+        if (orig == playlist_.currentIndex()) newCurrent = static_cast<int>(reordered.size());
+        reordered.push_back(playlist_.items()[orig]);
+    }
+    if (static_cast<int>(reordered.size()) != playlist_.size()) {
+        rebuildList(); // safety: row count mismatch, just resync
+        return;
+    }
+    playlist_.setItems(std::move(reordered));
+    playlist_.setCurrent(newCurrent);
+    rebuildList();
 }
 
 void PlaylistDock::onRemove() {
@@ -392,13 +479,33 @@ void PlaylistDock::onTogglePlayPause() { controller_.togglePlayPause(); }
 void PlaylistDock::onStop() { controller_.stop(); }
 
 void PlaylistDock::onNext() {
-    int i = playlist_.next(mode_ == Loop);
+    int i = (mode_ == Shuffle)
+                ? pld::randomIndex(playlist_.size(), playlist_.currentIndex(), rng_)
+                : playlist_.next(mode_ == Loop);
     if (i >= 0) playIndex(i);
 }
 
 void PlaylistDock::onPrev() {
     int i = playlist_.prev(mode_ == Loop);
     if (i >= 0) playIndex(i);
+}
+
+void PlaylistDock::onTick() {
+    if (!progress_) return;
+    long long dur = controller_.currentDurationMs();
+    long long cur = controller_.currentTimeMs();
+    if (dur > 0 && cur >= 0) {
+        progress_->setValue(static_cast<int>(1000.0 * cur / dur));
+        long long remaining = dur - cur;
+        if (remaining < 0) remaining = 0;
+        timeLabel_->setText(QStringLiteral("%1 / %2   -%3")
+                                .arg(QString::fromStdString(pld::formatDuration(cur)))
+                                .arg(QString::fromStdString(pld::formatDuration(dur)))
+                                .arg(QString::fromStdString(pld::formatDuration(remaining))));
+    } else {
+        progress_->setValue(0);
+        timeLabel_->clear();
+    }
 }
 
 void PlaylistDock::onSourceChanged(int) {
@@ -529,7 +636,7 @@ void PlaylistDock::loadSettings() {
     if (!doc.isObject()) return;
     QJsonObject o = doc.object();
     int m = o.value("mode").toInt(static_cast<int>(PlayNext));
-    if (m >= PlayNext && m <= StopAtEnd) mode_ = static_cast<EndMode>(m);
+    if (m >= PlayNext && m <= RepeatOne) mode_ = static_cast<EndMode>(m);
     pendingSource_ = o.value("source").toString();
 }
 

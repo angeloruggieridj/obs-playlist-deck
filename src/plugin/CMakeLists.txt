@@ -11,6 +11,7 @@ set(CMAKE_AUTORCC ON)
 add_library(obs-playlist-deck MODULE
   plugin-main.cpp
   PlaylistDock.cpp
+  PlaylistListWidget.cpp
   MediaSourceController.cpp
   MediaProbe.cpp
   ${CMAKE_SOURCE_DIR}/resources/icons.qrc

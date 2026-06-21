@@ -2,14 +2,18 @@
 #include <QDockWidget>
 #include <QIcon>
 #include <QString>
+#include <random>
 #include <obs.h>
 #include "Playlist.hpp"
 #include "MediaSourceController.hpp"
 
-class QListWidget;
 class QComboBox;
 class QLabel;
+class QLineEdit;
+class QProgressBar;
+class QTimer;
 class QNetworkAccessManager;
+class PlaylistListWidget;
 
 class PlaylistDock : public QDockWidget {
     Q_OBJECT
@@ -18,13 +22,10 @@ public:
     ~PlaylistDock() override;
 
     void refreshSources();
-
-    // Release all libobs resources while libobs is still alive. Called on
-    // OBS_FRONTEND_EVENT_EXIT so we never touch obs during teardown.
     void shutdown();
 
     // End-of-clip behavior (matches the "On end" combo order).
-    enum EndMode { PlayNext = 0, Loop = 1, LoadNext = 2, StopAtEnd = 3 };
+    enum EndMode { PlayNext = 0, Loop = 1, LoadNext = 2, StopAtEnd = 3, Shuffle = 4, RepeatOne = 5 };
 
 private slots:
     void onAddFiles();
@@ -42,12 +43,18 @@ private slots:
     void onOpenPlaylist();
     void onMediaEnded();
     void onSourceDeactivated();
+    void onFilesDropped(const QStringList& paths);
+    void onListReordered();
+    void onFilterChanged(const QString& text);
+    void onTick();
     void captureCurrentDuration();
 
 private:
     void buildUi();
     void rebuildList();
+    void applyFilter();
     QString itemText(int row) const;
+    void addPaths(const QStringList& paths);
     void playIndex(int row);
     void loadIndex(int row);
     bool loadPlaylistFile(const QString& path);
@@ -66,16 +73,21 @@ private:
     pld::Playlist playlist_;
     MediaSourceController controller_;
     EndMode mode_ = PlayNext;
-    QString pendingSource_;   // source name to reselect after refreshSources()
+    QString pendingSource_;
     bool obsShutdown_ = false;
-    bool pendingStageNext_ = false; // LoadNext: clip ended, waiting for program->preview
+    bool pendingStageNext_ = false;
+    std::mt19937 rng_{std::random_device{}()};
 
     QComboBox* sourceCombo_ = nullptr;
-    QListWidget* list_ = nullptr;
+    PlaylistListWidget* list_ = nullptr;
+    QLineEdit* filterEdit_ = nullptr;
     QComboBox* endCombo_ = nullptr;
+    QProgressBar* progress_ = nullptr;
+    QLabel* timeLabel_ = nullptr;
     QLabel* loadedLabel_ = nullptr;
     QLabel* status_ = nullptr;
     QLabel* versionLabel_ = nullptr;
+    QTimer* uiTimer_ = nullptr;
     QNetworkAccessManager* net_ = nullptr;
 
     obs_hotkey_id hkNext_ = OBS_INVALID_HOTKEY_ID;
