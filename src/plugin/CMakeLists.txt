@@ -11,6 +11,7 @@ set(CMAKE_AUTORCC ON)
 add_library(obs-playlist-deck MODULE
   plugin-main.cpp
   PlaylistDock.cpp
+  PlaylistListWidget.cpp
   MediaSourceController.cpp
   MediaProbe.cpp
   ${CMAKE_SOURCE_DIR}/resources/icons.qrc
@@ -31,6 +32,7 @@ target_compile_definitions(obs-playlist-deck PRIVATE PLD_VERSION="${PROJECT_VERS
 target_include_directories(obs-playlist-deck PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_SOURCE_DIR}/src/core
+  ${CMAKE_SOURCE_DIR}/third_party/obs-websocket-api
 )
 
 # Optional FFmpeg (libavformat/libavutil) for reading media durations.

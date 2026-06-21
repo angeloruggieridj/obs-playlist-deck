@@ -18,5 +18,6 @@
     <file>icons/download.svg</file>
     <file>icons/upload.svg</file>
     <file>icons/refresh.svg</file>
+    <file>icons/settings.svg</file>
   </qresource>
 </RCC>

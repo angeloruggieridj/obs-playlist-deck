@@ -4,18 +4,28 @@
 #include "MediaProbe.hpp"
 #include "Format.hpp"
 #include "Version.hpp"
+#include "Shuffle.hpp"
+#include "PlaylistListWidget.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
 
 #include <QAbstractItemView>
+#include <QBrush>
+#include <QCheckBox>
+#include <QColor>
 #include <QComboBox>
+#include <QCoreApplication>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QPointer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -27,6 +37,7 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSvgRenderer>
 #include <QTimer>
@@ -35,6 +46,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <thread>
 #include <utility>
 
 #ifndef PLD_VERSION
@@ -47,14 +59,19 @@ namespace {
 const char* kReleasesUrl = "https://github.com/angeloruggieridj/obs-playlist-deck/releases";
 const char* kLatestApi =
     "https://api.github.com/repos/angeloruggieridj/obs-playlist-deck/releases/latest";
+
+// Localized string lookup (falls back to the key if a translation is missing).
+QString T(const char* key) { return QString::fromUtf8(obs_module_text(key)); }
 }
 
 PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     setWindowTitle(QString::fromUtf8(obs_module_text("PlaylistDeck")));
     setObjectName("obs-playlist-deck-dock");
     loadSettings();
+    applyLocale();
     buildUi();
     refreshSources();
+    if (autoRestore_) loadSession();
     controller_.setOnMediaEnded([this]() {
         QMetaObject::invokeMethod(this, "onMediaEnded", Qt::QueuedConnection);
     });
@@ -63,6 +80,11 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     });
     registerHotkeys();
     checkForUpdate();
+
+    uiTimer_ = new QTimer(this);
+    uiTimer_->setInterval(500);
+    connect(uiTimer_, &QTimer::timeout, this, &PlaylistDock::onTick);
+    uiTimer_->start();
 }
 
 PlaylistDock::~PlaylistDock() {
@@ -126,67 +148,83 @@ void PlaylistDock::buildUi() {
     };
 
     // ---- Media source -----------------------------------------------------
-    col->addWidget(sectionLabel("Media source"));
+    col->addWidget(sectionLabel(T("Section.MediaSource")));
     sourceCombo_ = new QComboBox();
     sourceCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     sourceCombo_->setMinimumHeight(26);
-    auto* refreshBtn = mk(":/icons/refresh.svg", "Refresh", "Rescan media sources");
+    auto* refreshBtn = mk(":/icons/refresh.svg", T("Btn.Refresh"), T("Tip.Refresh"));
     auto* srcRow = new QHBoxLayout();
     srcRow->addWidget(sourceCombo_, 1);
     srcRow->addWidget(refreshBtn);
     col->addLayout(srcRow);
 
     // ---- Playlist ---------------------------------------------------------
-    col->addWidget(sectionLabel("Playlist"));
-    list_ = new QListWidget();
-    list_->setSelectionMode(QAbstractItemView::SingleSelection);
+    col->addWidget(sectionLabel(T("Section.Playlist")));
+    filterEdit_ = new QLineEdit();
+    filterEdit_->setClearButtonEnabled(true);
+    filterEdit_->setPlaceholderText(T("Filter.Placeholder"));
+    col->addWidget(filterEdit_);
+    list_ = new PlaylistListWidget();
     col->addWidget(list_, 1);
 
     auto* opsRow = new QHBoxLayout();
     opsRow->setSpacing(3);
-    auto* addBtn = mk(":/icons/plus.svg", "Add", "Add media files");
-    auto* rmBtn = mk(":/icons/minus.svg", "Remove", "Remove selected item");
-    auto* upBtn = mk(":/icons/chevron-up.svg", "Up", "Move selected item up");
-    auto* downBtn = mk(":/icons/chevron-down.svg", "Down", "Move selected item down");
-    auto* clrBtn = mk(":/icons/x.svg", "Clear", "Clear the playlist");
+    auto* addBtn = mk(":/icons/plus.svg", T("Btn.Add"), T("Tip.Add"));
+    auto* rmBtn = mk(":/icons/minus.svg", T("Btn.Remove"), T("Tip.Remove"));
+    auto* upBtn = mk(":/icons/chevron-up.svg", T("Btn.Up"), T("Tip.Up"));
+    auto* downBtn = mk(":/icons/chevron-down.svg", T("Btn.Down"), T("Tip.Down"));
+    auto* clrBtn = mk(":/icons/x.svg", T("Btn.Clear"), T("Tip.Clear"));
     for (auto* b : {addBtn, rmBtn, upBtn, downBtn, clrBtn}) opsRow->addWidget(b);
     opsRow->addStretch(1);
     col->addLayout(opsRow);
 
     auto* trRow = new QHBoxLayout();
     trRow->setSpacing(3);
-    auto* playSelBtn = mk(":/icons/play.svg", "Play", "Play the selected item");
-    auto* prevBtn = mk(":/icons/skip-back.svg", "Prev", "Previous item");
-    auto* playPauseBtn = mk(":/icons/pause.svg", "Pause", "Play / pause the bound source");
-    auto* stopBtn = mk(":/icons/stop.svg", "Stop", "Stop playback");
-    auto* nextBtn = mk(":/icons/skip-forward.svg", "Next", "Next item");
+    auto* playSelBtn = mk(":/icons/play.svg", T("Btn.Play"), T("Tip.Play"));
+    auto* prevBtn = mk(":/icons/skip-back.svg", T("Btn.Prev"), T("Tip.Prev"));
+    auto* playPauseBtn = mk(":/icons/pause.svg", T("Btn.Pause"), T("Tip.Pause"));
+    auto* stopBtn = mk(":/icons/stop.svg", T("Btn.Stop"), T("Tip.Stop"));
+    auto* nextBtn = mk(":/icons/skip-forward.svg", T("Btn.Next"), T("Tip.Next"));
     for (auto* b : {playSelBtn, prevBtn, playPauseBtn, stopBtn, nextBtn}) trRow->addWidget(b);
     trRow->addStretch(1);
     col->addLayout(trRow);
 
     auto* endRow = new QHBoxLayout();
-    endRow->addWidget(new QLabel("On end:"));
+    endRow->addWidget(new QLabel(T("OnEnd.Label")));
     endCombo_ = new QComboBox();
-    endCombo_->addItem("Play next");
-    endCombo_->addItem("Loop");
-    endCombo_->addItem("Load next (paused)");
-    endCombo_->addItem("Stop");
+    endCombo_->addItem(T("OnEnd.PlayNext"));
+    endCombo_->addItem(T("OnEnd.Loop"));
+    endCombo_->addItem(T("OnEnd.LoadNext"));
+    endCombo_->addItem(T("OnEnd.Stop"));
+    endCombo_->addItem(T("OnEnd.Shuffle"));
+    endCombo_->addItem(T("OnEnd.RepeatOne"));
     endCombo_->setCurrentIndex(static_cast<int>(mode_));
     endCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     endRow->addWidget(endCombo_, 1);
     col->addLayout(endRow);
 
+    // ---- Now playing progress --------------------------------------------
+    progress_ = new QProgressBar();
+    progress_->setRange(0, 1000);
+    progress_->setValue(0);
+    progress_->setTextVisible(false);
+    progress_->setFixedHeight(6);
+    col->addWidget(progress_);
+    timeLabel_ = new QLabel("");
+    timeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    col->addWidget(timeLabel_);
+
     // ---- Playlist file ----------------------------------------------------
-    col->addWidget(sectionLabel("Playlist file"));
+    col->addWidget(sectionLabel(T("Section.PlaylistFile")));
     auto* plRow = new QHBoxLayout();
     plRow->setSpacing(3);
-    auto* saveBtn = mk(":/icons/save.svg", "Save", "Save the playlist to a file you choose");
-    auto* openBtn = mk(":/icons/folder-open.svg", "Open", "Open a playlist file (.json / .m3u)");
+    auto* saveBtn = mk(":/icons/save.svg", T("Btn.Save"), T("Tip.Save"));
+    auto* openBtn = mk(":/icons/folder-open.svg", T("Btn.Open"), T("Tip.Open"));
     for (auto* b : {saveBtn, openBtn}) plRow->addWidget(b);
     plRow->addStretch(1);
     col->addLayout(plRow);
 
-    loadedLabel_ = new QLabel("No playlist loaded");
+    loadedLabel_ = new QLabel(T("NoPlaylist"));
     loadedLabel_->setWordWrap(true);
     col->addWidget(loadedLabel_);
 
@@ -199,13 +237,17 @@ void PlaylistDock::buildUi() {
     versionLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     versionLabel_->setTextFormat(Qt::RichText);
     versionLabel_->setOpenExternalLinks(true);
-    versionLabel_->setToolTip("Installed Playlist Deck version");
+    versionLabel_->setToolTip(T("Tip.Version"));
+    auto* settingsBtn = mk(":/icons/settings.svg", T("Btn.Settings"), T("Tip.Settings"));
     auto* verRow = new QHBoxLayout();
+    verRow->addWidget(settingsBtn);
     verRow->addStretch(1);
     verRow->addWidget(versionLabel_);
     col->addLayout(verRow);
 
     setWidget(root);
+
+    connect(settingsBtn, &QPushButton::clicked, this, &PlaylistDock::onOpenSettings);
 
     connect(refreshBtn, &QPushButton::clicked, this, &PlaylistDock::refreshSources);
     connect(addBtn, &QPushButton::clicked, this, &PlaylistDock::onAddFiles);
@@ -222,6 +264,9 @@ void PlaylistDock::buildUi() {
     connect(openBtn, &QPushButton::clicked, this, &PlaylistDock::onOpenPlaylist);
     connect(list_, &QListWidget::itemDoubleClicked, this,
             [this](QListWidgetItem*) { onPlaySelected(); });
+    connect(list_, &PlaylistListWidget::filesDropped, this, &PlaylistDock::onFilesDropped);
+    connect(list_, &PlaylistListWidget::reordered, this, &PlaylistDock::onListReordered);
+    connect(filterEdit_, &QLineEdit::textChanged, this, &PlaylistDock::onFilterChanged);
     connect(sourceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             &PlaylistDock::onSourceChanged);
     connect(endCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int i) {
@@ -240,11 +285,20 @@ QString PlaylistDock::itemText(int row) const {
 
 void PlaylistDock::rebuildList() {
     int sel = list_->currentRow();
+    list_->blockSignals(true);
     list_->clear();
     QIcon playing = tintedIcon(":/icons/play.svg");
     for (int i = 0; i < playlist_.size(); ++i) {
+        const auto& pi = playlist_.items()[i];
         auto* item = new QListWidgetItem(itemText(i));
-        item->setToolTip(QString::fromStdString(playlist_.items()[i].path));
+        item->setData(Qt::UserRole, i); // model index, used to sync drag-reorder
+        QString qpath = QString::fromStdString(pi.path);
+        if (!QFileInfo::exists(qpath)) {
+            item->setForeground(QBrush(QColor("#e06c75")));
+            item->setToolTip(qpath + "  (file not found)");
+        } else {
+            item->setToolTip(qpath);
+        }
         if (i == playlist_.currentIndex()) item->setIcon(playing);
         list_->addItem(item);
     }
@@ -252,7 +306,21 @@ void PlaylistDock::rebuildList() {
         list_->setCurrentRow(playlist_.currentIndex());
     else if (sel >= 0 && sel < playlist_.size())
         list_->setCurrentRow(sel);
+    list_->blockSignals(false);
+    applyFilter();
+    if (autoRestore_) saveSession();
 }
+
+void PlaylistDock::applyFilter() {
+    QString f = filterEdit_ ? filterEdit_->text().trimmed() : QString();
+    for (int row = 0; row < list_->count(); ++row) {
+        auto* item = list_->item(row);
+        bool match = f.isEmpty() || item->text().contains(f, Qt::CaseInsensitive);
+        item->setHidden(!match);
+    }
+}
+
+void PlaylistDock::onFilterChanged(const QString&) { applyFilter(); }
 
 void PlaylistDock::playIndex(int row) {
     pendingStageNext_ = false;
@@ -327,6 +395,16 @@ void PlaylistDock::onMediaEnded() {
         pendingStageNext_ = true;
         setStatus("Clip ended — next will load when this source leaves program.");
         break;
+    case Shuffle: {
+        int i = pld::randomIndex(playlist_.size(), playlist_.currentIndex(), rng_);
+        if (i >= 0) playIndex(i);
+        break;
+    }
+    case RepeatOne: {
+        int i = playlist_.currentIndex();
+        if (i >= 0) playIndex(i);
+        break;
+    }
     case StopAtEnd:
         controller_.stop();
         break;
@@ -340,18 +418,78 @@ void PlaylistDock::onSourceDeactivated() {
     if (i >= 0) loadIndex(i); // sets next file paused while off-air (in preview)
 }
 
-void PlaylistDock::onAddFiles() {
-    QStringList files = QFileDialog::getOpenFileNames(this, "Add media files");
-    int added = 0;
-    for (const auto& f : files) {
+void PlaylistDock::addPaths(const QStringList& paths) {
+    QStringList added;
+    for (const auto& f : paths) {
         std::string p = f.toStdString();
         if (!mediapath::isMediaFile(p)) continue;
-        PlaylistItem it{p, mediapath::fileStem(p), pld::probeDurationMs(p)};
-        playlist_.add(it);
-        ++added;
+        playlist_.add(PlaylistItem{p, mediapath::fileStem(p), -1}); // duration probed async
+        added << f;
     }
     rebuildList();
-    if (added) setStatus(QStringLiteral("Added %1 file(s).").arg(added));
+    if (!added.isEmpty()) {
+        setStatus(QStringLiteral("Added %1 file(s).").arg(added.size()));
+        startBackgroundProbe(added);
+    }
+}
+
+void PlaylistDock::startBackgroundProbe(const QStringList& paths) {
+    if (!enableProbe_) return;
+    QPointer<PlaylistDock> self(this);
+    std::thread([self, paths]() {
+        for (const QString& path : paths) {
+            long long d = pld::probeDurationMs(path.toStdString());
+            if (d < 0) continue;
+            QString p = path;
+            QMetaObject::invokeMethod(
+                qApp, [self, p, d]() { if (self) self->applyProbedDuration(p, d); },
+                Qt::QueuedConnection);
+        }
+    }).detach();
+}
+
+void PlaylistDock::applyProbedDuration(const QString& path, long long durationMs) {
+    if (durationMs < 0) return;
+    std::string p = path.toStdString();
+    auto items = playlist_.items();
+    bool changed = false;
+    for (auto& it : items)
+        if (it.path == p && it.durationMs < 0) {
+            it.durationMs = durationMs;
+            changed = true;
+        }
+    if (!changed) return;
+    int cur = playlist_.currentIndex();
+    playlist_.setItems(std::move(items));
+    playlist_.setCurrent(cur);
+    rebuildList();
+}
+
+void PlaylistDock::onAddFiles() {
+    addPaths(QFileDialog::getOpenFileNames(this, "Add media files"));
+}
+
+void PlaylistDock::onFilesDropped(const QStringList& paths) { addPaths(paths); }
+
+void PlaylistDock::onListReordered() {
+    // The widget rows were reordered by drag; rebuild the model from the new
+    // order using each item's stored original index.
+    std::vector<PlaylistItem> reordered;
+    reordered.reserve(playlist_.size());
+    int newCurrent = -1;
+    for (int row = 0; row < list_->count(); ++row) {
+        int orig = list_->item(row)->data(Qt::UserRole).toInt();
+        if (orig < 0 || orig >= playlist_.size()) continue;
+        if (orig == playlist_.currentIndex()) newCurrent = static_cast<int>(reordered.size());
+        reordered.push_back(playlist_.items()[orig]);
+    }
+    if (static_cast<int>(reordered.size()) != playlist_.size()) {
+        rebuildList(); // safety: row count mismatch, just resync
+        return;
+    }
+    playlist_.setItems(std::move(reordered));
+    playlist_.setCurrent(newCurrent);
+    rebuildList();
 }
 
 void PlaylistDock::onRemove() {
@@ -391,14 +529,46 @@ void PlaylistDock::onPlaySelected() {
 void PlaylistDock::onTogglePlayPause() { controller_.togglePlayPause(); }
 void PlaylistDock::onStop() { controller_.stop(); }
 
+// ---- Remote control (obs-websocket vendor) -------------------------------
+void PlaylistDock::wsNext() { onNext(); }
+void PlaylistDock::wsPrev() { onPrev(); }
+void PlaylistDock::wsStop() { onStop(); }
+void PlaylistDock::wsPlayPause() { onTogglePlayPause(); }
+void PlaylistDock::wsPlayIndex(int index) {
+    if (index >= 0 && index < playlist_.size()) playIndex(index);
+}
+void PlaylistDock::wsLoad(const QString& path) {
+    if (loadPlaylistFile(path)) setLoadedPlaylist(path);
+}
+
 void PlaylistDock::onNext() {
-    int i = playlist_.next(mode_ == Loop);
+    int i = (mode_ == Shuffle)
+                ? pld::randomIndex(playlist_.size(), playlist_.currentIndex(), rng_)
+                : playlist_.next(mode_ == Loop);
     if (i >= 0) playIndex(i);
 }
 
 void PlaylistDock::onPrev() {
     int i = playlist_.prev(mode_ == Loop);
     if (i >= 0) playIndex(i);
+}
+
+void PlaylistDock::onTick() {
+    if (!progress_) return;
+    long long dur = controller_.currentDurationMs();
+    long long cur = controller_.currentTimeMs();
+    if (dur > 0 && cur >= 0) {
+        progress_->setValue(static_cast<int>(1000.0 * cur / dur));
+        long long remaining = dur - cur;
+        if (remaining < 0) remaining = 0;
+        timeLabel_->setText(QStringLiteral("%1 / %2   -%3")
+                                .arg(QString::fromStdString(pld::formatDuration(cur)))
+                                .arg(QString::fromStdString(pld::formatDuration(dur)))
+                                .arg(QString::fromStdString(pld::formatDuration(remaining))));
+    } else {
+        progress_->setValue(0);
+        timeLabel_->clear();
+    }
 }
 
 void PlaylistDock::onSourceChanged(int) {
@@ -445,19 +615,23 @@ bool PlaylistDock::loadPlaylistFile(const QString& path) {
     } else {
         items = io::parseM3u(text);
     }
-    for (auto& it : items)
-        if (it.durationMs < 0) it.durationMs = pld::probeDurationMs(it.path);
+    QStringList toProbe;
+    for (const auto& it : items)
+        if (it.durationMs < 0) toProbe << QString::fromStdString(it.path);
     playlist_.setItems(std::move(items));
     rebuildList();
+    startBackgroundProbe(toProbe);
     return true;
 }
 
 void PlaylistDock::setLoadedPlaylist(const QString& path) {
+    loadedPath_ = path;
     if (path.isEmpty()) {
-        loadedLabel_->setText("No playlist loaded");
+        loadedLabel_->setText(T("NoPlaylist"));
+        loadedLabel_->setToolTip("");
         return;
     }
-    loadedLabel_->setText(QStringLiteral("Loaded: %1").arg(QFileInfo(path).fileName()));
+    loadedLabel_->setText(T("Loaded").arg(QFileInfo(path).fileName()));
     loadedLabel_->setToolTip(path);
 }
 
@@ -513,6 +687,9 @@ void PlaylistDock::saveSettings() const {
     QJsonObject o;
     o["mode"] = static_cast<int>(mode_);
     o["source"] = sourceCombo_ ? sourceCombo_->currentText() : QString();
+    o["enableProbe"] = enableProbe_;
+    o["autoRestore"] = autoRestore_;
+    o["language"] = language_;
     QFile f(path);
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
@@ -529,8 +706,108 @@ void PlaylistDock::loadSettings() {
     if (!doc.isObject()) return;
     QJsonObject o = doc.object();
     int m = o.value("mode").toInt(static_cast<int>(PlayNext));
-    if (m >= PlayNext && m <= StopAtEnd) mode_ = static_cast<EndMode>(m);
+    if (m >= PlayNext && m <= RepeatOne) mode_ = static_cast<EndMode>(m);
     pendingSource_ = o.value("source").toString();
+    enableProbe_ = o.value("enableProbe").toBool(true);
+    autoRestore_ = o.value("autoRestore").toBool(false);
+    language_ = o.value("language").toString("auto");
+}
+
+void PlaylistDock::applyLocale() {
+    if (language_ != "auto" && !language_.isEmpty())
+        obs_module_set_locale(language_.toUtf8().constData());
+}
+
+void PlaylistDock::applyLocaleAndRebuild() {
+    applyLocale();
+    QString loaded = loadedPath_;
+    buildUi(); // recreates all widgets with the new language
+    setWindowTitle(QString::fromUtf8(obs_module_text("PlaylistDeck")));
+    refreshSources();
+    rebuildList();
+    setLoadedPlaylist(loaded);
+}
+
+QString PlaylistDock::sessionPath() const {
+    char* p = obs_module_config_path("session.json");
+    QString s = p ? QString::fromUtf8(p) : QString();
+    bfree(p);
+    if (!s.isEmpty()) QDir().mkpath(QFileInfo(s).absolutePath());
+    return s;
+}
+
+void PlaylistDock::saveSession() const {
+    QString path = sessionPath();
+    if (path.isEmpty()) return;
+    std::string text = io::toJson("session", playlist_.items());
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(text.c_str());
+        f.close();
+    }
+}
+
+void PlaylistDock::loadSession() {
+    QString path = sessionPath();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    std::string text = f.readAll().toStdString();
+    f.close();
+    std::string n;
+    std::vector<PlaylistItem> items;
+    if (!io::fromJson(text, n, items)) return;
+    QStringList toProbe;
+    for (const auto& it : items)
+        if (it.durationMs < 0) toProbe << QString::fromStdString(it.path);
+    playlist_.setItems(std::move(items));
+    rebuildList();
+    startBackgroundProbe(toProbe);
+}
+
+void PlaylistDock::onOpenSettings() {
+    QDialog dlg(this);
+    dlg.setWindowTitle(T("Settings.Title"));
+    auto* form = new QFormLayout(&dlg);
+
+    auto* probeChk = new QCheckBox(T("Settings.Probe"));
+    probeChk->setChecked(enableProbe_);
+    form->addRow(probeChk);
+
+    auto* restoreChk = new QCheckBox(T("Settings.AutoRestore"));
+    restoreChk->setChecked(autoRestore_);
+    form->addRow(restoreChk);
+
+    auto* langCombo = new QComboBox();
+    langCombo->addItem(T("Lang.Auto"), "auto");
+    langCombo->addItem("English", "en-US");
+    langCombo->addItem("Italiano", "it-IT");
+    langCombo->addItem("Español", "es-ES");
+    langCombo->addItem("Français", "fr-FR");
+    langCombo->addItem("Deutsch", "de-DE");
+    langCombo->addItem("Português (BR)", "pt-BR");
+    langCombo->addItem("Русский", "ru-RU");
+    langCombo->addItem("简体中文", "zh-CN");
+    langCombo->addItem("日本語", "ja-JP");
+    langCombo->addItem("한국어", "ko-KR");
+    int li = langCombo->findData(language_);
+    langCombo->setCurrentIndex(li >= 0 ? li : 0);
+    form->addRow(new QLabel(T("Settings.Language")), langCombo);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+    if (dlg.exec() != QDialog::Accepted) return;
+    enableProbe_ = probeChk->isChecked();
+    autoRestore_ = restoreChk->isChecked();
+    QString newLang = langCombo->currentData().toString();
+    bool langChanged = (newLang != language_);
+    language_ = newLang;
+    saveSettings();
+    if (autoRestore_) saveSession();
+    if (langChanged) applyLocaleAndRebuild();
+    setStatus(T("Settings.Saved"));
 }
 
 void PlaylistDock::checkForUpdate() {

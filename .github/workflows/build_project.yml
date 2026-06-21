@@ -55,17 +55,41 @@ jobs:
     name: Windows x64
     needs: tests
     runs-on: windows-2022
+    env:
+      QT_WIN_VERSION: "6.7.3"
+      QT_WIN_ARCH: "win64_msvc2019_64"
     steps:
       - uses: actions/checkout@v6
+
+      # --- Qt (cached) ---
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v5
+        with:
+          path: C:\Qt
+          key: qt-${{ env.QT_WIN_VERSION }}-${{ env.QT_WIN_ARCH }}-v1
       - name: Install Qt6
+        if: steps.cache-qt.outputs.cache-hit != 'true'
         shell: powershell
         run: |
           python -m pip install --upgrade pip
           python -m pip install "aqtinstall==3.1.*" "py7zr<1.0"
-          python -m aqt install-qt windows desktop 6.7.3 win64_msvc2019_64 -O C:\Qt
-          "Qt6_DIR=C:\Qt\6.7.3\msvc2019_64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "C:\Qt\6.7.3\msvc2019_64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          python -m aqt install-qt windows desktop ${{ env.QT_WIN_VERSION }} ${{ env.QT_WIN_ARCH }} -O C:\Qt
+      - name: Qt environment
+        shell: powershell
+        run: |
+          "Qt6_DIR=C:\Qt\${{ env.QT_WIN_VERSION }}\msvc2019_64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C:\Qt\${{ env.QT_WIN_VERSION }}\msvc2019_64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # --- OBS prebuilt deps (cached) ---
+      - name: Cache obs-deps
+        id: cache-deps
+        uses: actions/cache@v5
+        with:
+          path: C:\obs-deps
+          key: obsdeps-win-x64-v1
       - name: Download OBS pre-built deps
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: powershell
@@ -81,12 +105,25 @@ jobs:
           } else {
             $top | Move-Item -Destination C:\obs-deps
           }
+
+      # --- OBS dev libs (cached per OBS version) ---
+      # The expensive part: building libobs + obs-frontend-api from source. The
+      # installed dev tree lives at the fixed path C:\obs-dev, so the cache stays
+      # valid across runs (deps/Qt are also at fixed C:\ paths).
+      - name: Cache OBS dev
+        id: cache-obsdev
+        uses: actions/cache@v5
+        with:
+          path: C:\obs-dev
+          key: obsdev-win-${{ env.OBS_VERSION }}-v1
       - name: Download OBS source
-        shell: powershell
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
+        shell: cmd
         run: |
-          Invoke-WebRequest "https://github.com/obsproject/obs-studio/archive/refs/tags/${{ env.OBS_VERSION }}.zip" -OutFile obs.zip
-          Expand-Archive obs.zip -DestinationPath C:\
+          curl -L "https://github.com/obsproject/obs-studio/archive/refs/tags/%OBS_VERSION%.zip" -o obs.zip
+          tar -xf obs.zip -C C:\
       - name: Configure OBS
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           cmake -B C:\obs-build -S "C:\obs-studio-${{ env.OBS_VERSION }}" -A x64 ^
@@ -100,8 +137,10 @@ jobs:
             -DQTDIR="%Qt6_DIR%" ^
             -DCMAKE_PREFIX_PATH="C:\obs-deps;%Qt6_DIR%"
       - name: Build OBS
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: cmake --build C:\obs-build --target obs-frontend-api --config Release --parallel
       - name: Install OBS dev
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: cmake --install C:\obs-build --config Release --component Development --prefix C:\obs-dev
       - name: Configure plugin
         shell: cmd
@@ -129,7 +168,18 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install dependencies
         run: brew install cmake ninja
+
+      # --- OBS prebuilt universal deps (cached) ---
+      - name: Cache obs-deps
+        id: cache-deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            /tmp/obs-deps
+            /tmp/obs-deps-qt6
+          key: obsdeps-mac-universal-${{ env.OBS_DEPS_VERSION }}-v1
       - name: Download universal OBS pre-built deps
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/obs-deps /tmp/obs-deps-qt6
           curl -fsSL \
@@ -138,7 +188,19 @@ jobs:
           curl -fsSL \
             "https://github.com/obsproject/obs-deps/releases/download/${{ env.OBS_DEPS_VERSION }}/macos-deps-qt6-${{ env.OBS_DEPS_VERSION }}-universal.tar.xz" \
             | tar -xJ -C /tmp/obs-deps-qt6
+
+      # --- OBS dev libs (universal, cached per OBS version) ---
+      # The expensive part: building libobs + obs-frontend-api universal from
+      # source. The installed dev tree lives at the fixed path /tmp/obs-dev, so
+      # the cache stays valid across runs (deps are also at fixed /tmp paths).
+      - name: Cache OBS dev
+        id: cache-obsdev
+        uses: actions/cache@v5
+        with:
+          path: /tmp/obs-dev
+          key: obsdev-mac-universal-${{ env.OBS_VERSION }}-v1
       - name: Clone OBS source
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: |
           git clone --depth=1 --branch ${{ env.OBS_VERSION }} \
             https://github.com/obsproject/obs-studio.git /tmp/obs
@@ -148,6 +210,7 @@ jobs:
           # drop it; we only need libobs + obs-frontend-api dev files.
           sed -i.bak 's/^\( *\)add_subdirectory(libobs-metal)/\1# disabled for dev build: add_subdirectory(libobs-metal)/' /tmp/obs/CMakeLists.txt
       - name: Configure OBS (universal)
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: |
           cmake -B /tmp/obs-build -S /tmp/obs \
             -G Xcode \
@@ -159,8 +222,10 @@ jobs:
             -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
             -DCMAKE_PREFIX_PATH="/tmp/obs-deps-qt6;/tmp/obs-deps"
       - name: Build OBS
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: cmake --build /tmp/obs-build --target obs-frontend-api --config Release --parallel
       - name: Install OBS dev
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: cmake --install /tmp/obs-build --config Release --component Development --prefix /tmp/obs-dev
       - name: Configure plugin (universal)
         run: |
@@ -206,8 +271,8 @@ jobs:
             <key>CFBundleIdentifier</key><string>com.angeloruggieridj.obs-playlist-deck</string>
             <key>CFBundleName</key><string>Playlist Deck</string>
             <key>CFBundlePackageType</key><string>BNDL</string>
-            <key>CFBundleShortVersionString</key><string>1.0.1</string>
-            <key>CFBundleVersion</key><string>1.0.1</string>
+            <key>CFBundleShortVersionString</key><string>1.1.0</string>
+            <key>CFBundleVersion</key><string>1.1.0</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
           </dict>
           </plist>
@@ -258,6 +323,80 @@ jobs:
           name: obs-playlist-deck-macos
           path: obs-playlist-deck-macos-universal.tar.gz
 
+  # Best-effort compatibility check: does the plugin compile against older OBS
+  # SDKs? Informational only (continue-on-error) and not a release gate.
+  compat:
+    name: OBS compat ${{ matrix.obs }}
+    needs: tests
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        obs: ["30.0.0", "31.0.0"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config \
+            qt6-base-dev qt6-base-private-dev qt6-svg-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev \
+            libavfilter-dev libswscale-dev libswresample-dev libx264-dev \
+            libcurl4-openssl-dev libjansson-dev libmbedtls-dev libsimde-dev \
+            uthash-dev nlohmann-json3-dev zlib1g-dev libpng-dev \
+            libpipewire-0.3-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shm0-dev \
+            libxcb-xfixes0-dev libxcb-composite0-dev libxcb-xinput-dev \
+            libxfixes-dev libxcomposite-dev libxinerama-dev libxss-dev \
+            libpci-dev libpulse-dev libudev-dev libasound2-dev
+      - name: Cache OBS dev
+        id: cache-obsdev
+        uses: actions/cache@v5
+        with:
+          path: /tmp/obs-dev
+          key: obsdev-linux-${{ matrix.obs }}-v1
+      - name: Build OBS dev (${{ matrix.obs }})
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth=1 --branch ${{ matrix.obs }} \
+            https://github.com/obsproject/obs-studio.git /tmp/obs
+          cmake -B /tmp/obs-build -S /tmp/obs -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_PLUGINS=OFF -DENABLE_UI=OFF -DENABLE_SCRIPTING=OFF \
+            -DENABLE_BROWSER=OFF -DENABLE_VLC=OFF -DENABLE_WAYLAND=OFF \
+            -DENABLE_PIPEWIRE=OFF
+          cmake --build /tmp/obs-build --target obs-frontend-api --parallel
+          cmake --install /tmp/obs-build --component Development --prefix /tmp/obs-dev
+      - name: Configure + build plugin against OBS ${{ matrix.obs }}
+        run: |
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF \
+            -DCMAKE_PREFIX_PATH="/tmp/obs-dev;/usr"
+          cmake --build build
+
+  streamdeck:
+    name: Stream Deck companion
+    needs: tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Render icons + package
+        run: |
+          sudo apt-get update && sudo apt-get install -y librsvg2-bin zip
+          cd "streamdeck/com.angeloruggieridj.playlist-deck.sdPlugin/icons"
+          for f in *.svg; do
+            n="${f%.svg}"
+            rsvg-convert -w 72  -h 72  "$f" -o "$n.png"
+            rsvg-convert -w 144 -h 144 "$f" -o "$n@2x.png"
+          done
+          cd "${{ github.workspace }}/streamdeck"
+          zip -r "${{ github.workspace }}/obs-playlist-deck-streamdeck.zip" com.angeloruggieridj.playlist-deck.sdPlugin
+      - uses: actions/upload-artifact@v7
+        with:
+          name: obs-playlist-deck-streamdeck
+          path: obs-playlist-deck-streamdeck.zip
+
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/')
@@ -266,6 +405,7 @@ jobs:
       - linux
       - windows
       - macos
+      - streamdeck
     runs-on: ubuntu-24.04
     steps:
       - name: Download packaged artifacts
@@ -276,7 +416,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
           files: |
             release-assets/obs-playlist-deck-linux-x86_64.tar.gz
             release-assets/obs-playlist-deck-windows.zip
             release-assets/obs-playlist-deck-macos-universal.tar.gz
+            release-assets/obs-playlist-deck-streamdeck.zip
