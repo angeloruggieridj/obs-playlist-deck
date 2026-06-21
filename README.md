@@ -1,82 +1,80 @@
-# Playlist Deck for OBS
+<div align="center">
 
-Native OBS Studio dock that manages a playlist of local media files and drives
-an **existing OBS media source** from it. Selecting a playlist item sets that
-source's file, restarts playback, and (optionally) auto-advances to the next
-item when the current one ends — so you never edit the source path by hand while
-live.
+# 🎬 Playlist Deck for OBS
 
-No browser source, no embedded web server, no HTML player. Pure OBS + Qt.
+**Queue, play, and control local media through an existing OBS source — from a native dock.**
+
+[![Build](https://github.com/angeloruggieridj/obs-playlist-deck/actions/workflows/build_project.yml/badge.svg)](https://github.com/angeloruggieridj/obs-playlist-deck/actions/workflows/build_project.yml)
+[![Latest release](https://img.shields.io/github/v/release/angeloruggieridj/obs-playlist-deck?include_prereleases&sort=semver)](https://github.com/angeloruggieridj/obs-playlist-deck/releases)
+[![Downloads](https://img.shields.io/github/downloads/angeloruggieridj/obs-playlist-deck/total)](https://github.com/angeloruggieridj/obs-playlist-deck/releases)
+[![License: MIT](https://img.shields.io/github/license/angeloruggieridj/obs-playlist-deck)](LICENSE)
+
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20universal-blue)
+![OBS](https://img.shields.io/badge/OBS%20Studio-31%2B-302e31?logo=obsstudio)
+![Languages](https://img.shields.io/badge/i18n-10%20languages-brightgreen)
+
+</div>
+
+Playlist Deck adds a dock to OBS that manages a playlist of local media files and
+drives an **existing OBS media source** from it. Pick a source, build your
+playlist, and play items through it — you never edit the source's file path by
+hand while live. No browser source, no embedded web server: pure OBS + Qt.
+
+## Table of contents
+
+- [Features](#features)
+- [Installation](#installation)
+  - [Windows](#windows)
+  - [Linux](#linux)
+  - [macOS](#macos-universal)
+- [Usage](#usage)
+- [End-of-clip modes](#end-of-clip-modes)
+- [Remote control & Stream Deck](#remote-control--stream-deck)
+- [Localization](#localization)
+- [Compatibility](#compatibility)
+- [Building from source](#building-from-source)
+- [License](#license)
 
 ## Features
 
-- Native Qt dock living inside OBS — no browser source, no web server.
-- Bind to any existing **Media Source** (`ffmpeg_source`) or **VLC Source**
-  via a dropdown.
-- Playlist with add / remove / reorder / clear and transport controls
-  (play, prev, play-pause, stop, next), with each item's **duration** shown.
-- **On end** behavior selector:
-  - *Play next* — auto-advance to the next item.
-  - *Loop* — auto-advance and wrap around.
-  - *Load next (paused)* — hold the finished clip's last frame on program and
-    stage the next clip (paused, off-air) only when the source leaves program
-    (studio-mode program → preview). The next clip's first frame never goes
-    live and the playlist never auto-advances on air.
-  - *Stop* — stop at the end of the clip.
-- Extra modes: **Shuffle** (random next) and **Repeat one**.
-- **Drag & drop** files from the OS file manager into the list; reorder by drag.
-  Missing files are highlighted; a **filter box** narrows long playlists.
-- Now-playing **progress bar** with elapsed / total / remaining time.
-- Save / open playlists as **`.json` or `.m3u/.m3u8`** to a location you choose;
-  the loaded playlist file is shown in the dock.
-- Optional **auto-restore** of the last playlist on startup; **background**
-  duration probing so large playlists load instantly (Settings dialog).
-- Global OBS hotkeys: next, previous, play/pause, stop.
-- **Remote control** via obs-websocket (vendor `obs-playlist-deck`) and an
-  included **Stream Deck companion** — see below.
-- **Localized** UI: English, Italian, Spanish, French, German, Portuguese (BR),
-  Russian, Chinese (Simplified), Japanese, Korean — selectable, or follow OBS's
-  language (other OBS languages fall back to English).
-- Remembers the **On end** mode and the bound source across restarts.
-- Shows the plugin version and links to the latest release when an update is
-  available (manual download — no auto-install).
-- Cross-platform: Windows x64, Linux x86_64, macOS universal (Intel + Apple
-  Silicon). Requires **OBS Studio 30.0+** (built and tested against 32.1.2).
+- 🎛️ Native Qt dock inside OBS; bind to any **Media Source** (`ffmpeg_source`)
+  or **VLC Source** via a dropdown.
+- 📃 Playlist with add / remove / reorder / clear and transport controls; each
+  item shows its **duration**.
+- 🖱️ **Drag & drop** files from the OS file manager; reorder by drag; missing
+  files highlighted; a **filter** box for long playlists.
+- 🔀 Playback modes: **Play next**, **Loop**, **Load next (paused)**, **Stop**,
+  **Shuffle**, **Repeat one**.
+- ⏱️ Now-playing **progress bar** with elapsed / total / remaining time.
+- 💾 Save / open playlists as **`.json`** or **`.m3u/.m3u8`** to a location you
+  choose; optional **auto-restore** of the last playlist; **background**
+  duration probing.
+- ⌨️ Global OBS **hotkeys**: next, previous, play/pause, stop.
+- 🕹️ **Remote control** via obs-websocket + an included **Stream Deck** companion.
+- 🌍 **Localized** UI (10 languages) — selectable or follow OBS.
+- 🔔 Built-in update check (links to the latest release; manual download).
 
-## Remote control (obs-websocket) & Stream Deck
+## Installation
 
-Playlist Deck registers an obs-websocket **vendor** named `obs-playlist-deck`
-with requests: `Next`, `Previous`, `PlayPause`, `Stop`, `PlayIndex` (`{index}`),
-`Load` (`{path}`), `GetStatus`. Call them via obs-websocket v5
-`CallVendorRequest` from any client or script.
-
-An Elgato **Stream Deck companion** lives in [`streamdeck/`](streamdeck/) with
-Next / Previous / Play-Pause / Stop / Play Item actions. It is buildless (plain
-JS/HTML). Download `obs-playlist-deck-streamdeck.zip` from a release (icons
-pre-rendered) and copy the `.sdPlugin` folder into the Stream Deck plugins
-directory, or build it yourself — see [`streamdeck/README.md`](streamdeck/README.md).
-
-## Install
-
-Download the latest build for your platform from the
-[Releases](https://github.com/angeloruggieridj/obs-playlist-deck/releases) page.
+Download your platform's build from the
+[**Releases**](https://github.com/angeloruggieridj/obs-playlist-deck/releases) page.
 
 ### Windows
-Extract the zip into your OBS install folder (so `obs-plugins/64bit/` and
-`data/obs-plugins/` merge with OBS's).
+Extract the zip into your OBS install folder, so `obs-plugins/64bit/` and
+`data/obs-plugins/` merge with OBS's.
 
 ### Linux
 ```bash
 sudo tar -xzf obs-playlist-deck-linux-x86_64.tar.gz -C /
 ```
-(For a system OBS install — not Flatpak/Snap.)
+For a system OBS install (not Flatpak/Snap).
 
-### macOS (universal — Intel & Apple Silicon)
+### macOS (universal)
 ```bash
 PLUGIN_DIR="$HOME/Library/Application Support/obs-studio/plugins"
 mkdir -p "$PLUGIN_DIR"
 tar -xzf obs-playlist-deck-macos-universal.tar.gz -C "$PLUGIN_DIR"
-# remove the download quarantine so OBS can load the unsigned plugin:
+# the build is ad-hoc signed (not notarized) — clear the download quarantine once:
 xattr -dr com.apple.quarantine "$PLUGIN_DIR/obs-playlist-deck.plugin"
 ```
 Then open OBS → the **Playlist Deck** dock appears under the *Docks* menu.
@@ -84,23 +82,52 @@ Then open OBS → the **Playlist Deck** dock appears under the *Docks* menu.
 ## Usage
 
 1. Add a **Media Source** (or VLC Source) to a scene in OBS.
-2. In the Playlist Deck dock, pick that source from the **Media source**
-   dropdown.
-3. **Add** media files, then double-click an item (or select it and press
-   **Play**) to play it through that source.
-4. Pick an **On end** behavior. Use **Save** / **Open** to keep playlists as
-   files you choose (`.json` or `.m3u`).
+2. In the Playlist Deck dock, select it from the **Media source** dropdown.
+3. **Add** media files (or drag them in), then double-click an item — or select
+   it and press **Play** — to play it through that source.
+4. Choose an **End-of-clip** behavior, and use **Save** / **Open** to keep
+   playlists as files.
 
-### macOS Gatekeeper note
+## End-of-clip modes
 
-The macOS build is ad-hoc signed (not notarized), so after downloading you must
-clear the download quarantine once, otherwise OBS won't load it:
+| Mode | Behavior |
+|------|----------|
+| **Play next** | Auto-advance to the next item. |
+| **Loop** | Auto-advance and wrap around. |
+| **Load next (paused)** | Hold the finished clip's last frame on Program; stage the next clip (paused, off-air) only when the source moves Program → Preview in Studio Mode. The next clip never goes live early and the playlist never auto-advances on air. |
+| **Stop** | Stop at the end of the clip. |
+| **Shuffle** | Play a random next item. |
+| **Repeat one** | Replay the current item. |
 
-```bash
-xattr -dr com.apple.quarantine "$HOME/Library/Application Support/obs-studio/plugins/obs-playlist-deck.plugin"
-```
+## Remote control & Stream Deck
 
-## Build from source
+Playlist Deck registers an obs-websocket **vendor** named `obs-playlist-deck`
+with requests `Next`, `Previous`, `PlayPause`, `Stop`, `PlayIndex` (`{index}`),
+`Load` (`{path}`), `GetStatus`. Call them via obs-websocket v5
+`CallVendorRequest` from any client or script.
+
+An Elgato **Stream Deck companion** lives in [`streamdeck/`](streamdeck/) with
+Next / Previous / Play-Pause / Stop / Play Item actions (buildless JS). Grab
+`obs-playlist-deck-streamdeck.zip` from a release and copy the `.sdPlugin`
+folder into your Stream Deck plugins directory — see
+[`streamdeck/README.md`](streamdeck/README.md).
+
+## Localization
+
+Bundled languages: **English, Italian, Spanish, French, German, Portuguese (BR),
+Russian, Chinese (Simplified), Japanese, Korean**. Pick one in Settings or let it
+follow OBS's UI language; any other OBS language falls back to English. Strings
+live in [`data/locale/`](data/locale/) (`en-US.ini` is the canonical key set).
+
+## Compatibility
+
+| | |
+|---|---|
+| **OBS Studio** | **31.0+** (CI-certified). Built/tested against **32.1.2**. Uses `obs_frontend_add_custom_qdock` (OBS 30.0+), so 30.x is expected to work but is not CI-verified. |
+| **Platforms** | Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon) |
+| **Qt** | Qt 6 |
+
+## Building from source
 
 Requires CMake ≥ 3.22, a C++17 compiler, Qt 6, and OBS development files
 (`libobs`, `obs-frontend-api`).
@@ -110,27 +137,18 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Run the unit tests (no OBS/Qt needed):
+Unit tests (no OBS/Qt needed):
 ```bash
 cmake -B build-tests -DBUILD_PLUGIN=OFF -DBUILD_TESTS=ON
 cmake --build build-tests
 ctest --test-dir build-tests --output-on-failure
 ```
 
-See [.github/workflows/build_project.yml](.github/workflows/build_project.yml)
-for the exact CI build steps per platform. CI builds OBS dev libraries from
-source (cached per OBS version), builds the plugin, and — for the Stream Deck
-companion — renders the SVG icons to PNG with `rsvg-convert` and zips the
-`.sdPlugin` into `obs-playlist-deck-streamdeck.zip`. A `compat` matrix
-additionally compiles the plugin against OBS 30/31 SDKs to inform the supported
-minimum version.
-
-### Localization
-
-UI strings live in [`data/locale/*.ini`](data/locale/); `en-US.ini` is the
-canonical key set. To add a language, copy it to `<code>.ini`, translate the
-values, and (optionally) add it to the language selector in
-`src/plugin/PlaylistDock.cpp`. Missing keys fall back to English automatically.
+CI ([`.github/workflows/build_project.yml`](.github/workflows/build_project.yml))
+builds OBS dev libraries from source (cached per OBS version) and the plugin per
+platform, renders the Stream Deck icons and packages the companion, and runs an
+on-demand `compat` matrix against older OBS SDKs. See
+[`docs/superpowers/`](docs/superpowers/) for the design spec and plan.
 
 ## License
 
