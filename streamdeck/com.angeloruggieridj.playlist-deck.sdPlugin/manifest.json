@@ -1,6 +1,6 @@
 {
   "SDKVersion": 2,
-  "Version": "1.0.0",
+  "Version": "1.1.0",
   "Author": "Angelo Ruggieri",
   "Name": "Playlist Deck",
   "Description": "Control the OBS Playlist Deck plugin (next, previous, play/pause, stop, play item) over obs-websocket.",

@@ -781,6 +781,14 @@ void PlaylistDock::onOpenSettings() {
     langCombo->addItem(T("Lang.Auto"), "auto");
     langCombo->addItem("English", "en-US");
     langCombo->addItem("Italiano", "it-IT");
+    langCombo->addItem("Español", "es-ES");
+    langCombo->addItem("Français", "fr-FR");
+    langCombo->addItem("Deutsch", "de-DE");
+    langCombo->addItem("Português (BR)", "pt-BR");
+    langCombo->addItem("Русский", "ru-RU");
+    langCombo->addItem("简体中文", "zh-CN");
+    langCombo->addItem("日本語", "ja-JP");
+    langCombo->addItem("한국어", "ko-KR");
     int li = langCombo->findData(language_);
     langCombo->setCurrentIndex(li >= 0 ? li : 0);
     form->addRow(new QLabel(T("Settings.Language")), langCombo);
