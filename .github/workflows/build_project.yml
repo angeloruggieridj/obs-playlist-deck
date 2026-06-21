@@ -55,17 +55,41 @@ jobs:
     name: Windows x64
     needs: tests
     runs-on: windows-2022
+    env:
+      QT_WIN_VERSION: "6.7.3"
+      QT_WIN_ARCH: "win64_msvc2019_64"
     steps:
       - uses: actions/checkout@v6
+
+      # --- Qt (cached) ---
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: C:\Qt
+          key: qt-${{ env.QT_WIN_VERSION }}-${{ env.QT_WIN_ARCH }}-v1
       - name: Install Qt6
+        if: steps.cache-qt.outputs.cache-hit != 'true'
         shell: powershell
         run: |
           python -m pip install --upgrade pip
           python -m pip install "aqtinstall==3.1.*" "py7zr<1.0"
-          python -m aqt install-qt windows desktop 6.7.3 win64_msvc2019_64 -O C:\Qt
-          "Qt6_DIR=C:\Qt\6.7.3\msvc2019_64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "C:\Qt\6.7.3\msvc2019_64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          python -m aqt install-qt windows desktop ${{ env.QT_WIN_VERSION }} ${{ env.QT_WIN_ARCH }} -O C:\Qt
+      - name: Qt environment
+        shell: powershell
+        run: |
+          "Qt6_DIR=C:\Qt\${{ env.QT_WIN_VERSION }}\msvc2019_64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C:\Qt\${{ env.QT_WIN_VERSION }}\msvc2019_64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # --- OBS prebuilt deps (cached) ---
+      - name: Cache obs-deps
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: C:\obs-deps
+          key: obsdeps-win-x64-v1
       - name: Download OBS pre-built deps
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: powershell
@@ -81,12 +105,25 @@ jobs:
           } else {
             $top | Move-Item -Destination C:\obs-deps
           }
+
+      # --- OBS dev libs (cached per OBS version) ---
+      # The expensive part: building libobs + obs-frontend-api from source. The
+      # installed dev tree lives at the fixed path C:\obs-dev, so the cache stays
+      # valid across runs (deps/Qt are also at fixed C:\ paths).
+      - name: Cache OBS dev
+        id: cache-obsdev
+        uses: actions/cache@v4
+        with:
+          path: C:\obs-dev
+          key: obsdev-win-${{ env.OBS_VERSION }}-v1
       - name: Download OBS source
-        shell: powershell
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
+        shell: cmd
         run: |
-          Invoke-WebRequest "https://github.com/obsproject/obs-studio/archive/refs/tags/${{ env.OBS_VERSION }}.zip" -OutFile obs.zip
-          Expand-Archive obs.zip -DestinationPath C:\
+          curl -L "https://github.com/obsproject/obs-studio/archive/refs/tags/%OBS_VERSION%.zip" -o obs.zip
+          tar -xf obs.zip -C C:\
       - name: Configure OBS
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           cmake -B C:\obs-build -S "C:\obs-studio-${{ env.OBS_VERSION }}" -A x64 ^
@@ -100,8 +137,10 @@ jobs:
             -DQTDIR="%Qt6_DIR%" ^
             -DCMAKE_PREFIX_PATH="C:\obs-deps;%Qt6_DIR%"
       - name: Build OBS
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: cmake --build C:\obs-build --target obs-frontend-api --config Release --parallel
       - name: Install OBS dev
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: cmake --install C:\obs-build --config Release --component Development --prefix C:\obs-dev
       - name: Configure plugin
         shell: cmd
