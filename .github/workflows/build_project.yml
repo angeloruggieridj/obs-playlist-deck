@@ -323,6 +323,53 @@ jobs:
           name: obs-playlist-deck-macos
           path: obs-playlist-deck-macos-universal.tar.gz
 
+  # Best-effort compatibility check: does the plugin compile against older OBS
+  # SDKs? Informational only (continue-on-error) and not a release gate.
+  compat:
+    name: OBS compat ${{ matrix.obs }}
+    needs: tests
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        obs: ["30.0.0", "31.0.0"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build qt6-base-dev qt6-svg-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev \
+            libswscale-dev libswresample-dev libx264-dev libjansson-dev \
+            libpipewire-0.3-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev \
+            libxcb1-dev libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shm0-dev \
+            libxcb-xfixes0-dev libxcb-composite0-dev libxcb-xinput-dev \
+            libpci-dev libpulse-dev libudev-dev
+      - name: Cache OBS dev
+        id: cache-obsdev
+        uses: actions/cache@v4
+        with:
+          path: /tmp/obs-dev
+          key: obsdev-linux-${{ matrix.obs }}-v1
+      - name: Build OBS dev (${{ matrix.obs }})
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth=1 --branch ${{ matrix.obs }} \
+            https://github.com/obsproject/obs-studio.git /tmp/obs
+          cmake -B /tmp/obs-build -S /tmp/obs -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_PLUGINS=OFF -DENABLE_UI=OFF -DENABLE_SCRIPTING=OFF \
+            -DENABLE_BROWSER=OFF -DENABLE_VLC=OFF -DENABLE_WAYLAND=OFF \
+            -DENABLE_PIPEWIRE=OFF
+          cmake --build /tmp/obs-build --target obs-frontend-api --parallel
+          cmake --install /tmp/obs-build --component Development --prefix /tmp/obs-dev
+      - name: Configure + build plugin against OBS ${{ matrix.obs }}
+        run: |
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF \
+            -DCMAKE_PREFIX_PATH="/tmp/obs-dev;/usr"
+          cmake --build build
+
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/')

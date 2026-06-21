@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Playlist Deck Settings</title>
+    <style>
+      body { font: 9pt "Segoe UI", sans-serif; color: #ddd; background: #2d2d2d; margin: 0; padding: 8px; }
+      .row { display: flex; align-items: center; margin: 6px 0; }
+      .row label { width: 90px; opacity: 0.85; }
+      .row input { flex: 1; background: #3d3d3d; border: 1px solid #555; color: #fff; padding: 4px; border-radius: 3px; }
+      h4 { margin: 8px 0 2px; opacity: 0.7; }
+      .hint { opacity: 0.55; font-size: 8pt; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <div id="itemBox" style="display:none">
+      <h4>Item</h4>
+      <div class="row"><label>Index (0-based)</label><input id="index" type="number" min="0" value="0" /></div>
+    </div>
+
+    <h4>OBS connection</h4>
+    <div class="row"><label>Host</label><input id="host" value="127.0.0.1" /></div>
+    <div class="row"><label>Port</label><input id="port" type="number" value="4455" /></div>
+    <div class="row"><label>Password</label><input id="password" type="password" /></div>
+    <div class="hint">Enable OBS → Tools → WebSocket Server Settings, then enter the same host/port/password. Requires the Playlist Deck OBS plugin.</div>
+
+    <script>
+      let sd = null, uuid = null, action = "";
+      const $ = (id) => document.getElementById(id);
+
+      function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
+        uuid = inUUID;
+        const info = inActionInfo ? JSON.parse(inActionInfo) : {};
+        action = info.action || "";
+        const itemSettings = (info.payload && info.payload.settings) || {};
+        if (action.endsWith(".playitem")) {
+          $("itemBox").style.display = "block";
+          if (itemSettings.index !== undefined) $("index").value = itemSettings.index;
+        }
+
+        sd = new WebSocket("ws://127.0.0.1:" + inPort);
+        sd.onopen = () => {
+          sd.send(JSON.stringify({ event: inRegisterEvent, uuid: inUUID }));
+          sd.send(JSON.stringify({ event: "getGlobalSettings", context: inUUID }));
+        };
+        sd.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.event === "didReceiveGlobalSettings") {
+            const s = (msg.payload && msg.payload.settings) || {};
+            if (s.host) $("host").value = s.host;
+            if (s.port) $("port").value = s.port;
+            if (s.password) $("password").value = s.password;
+          }
+        };
+      }
+
+      function saveGlobal() {
+        if (!sd) return;
+        const settings = {
+          host: $("host").value.trim() || "127.0.0.1",
+          port: parseInt($("port").value, 10) || 4455,
+          password: $("password").value,
+        };
+        sd.send(JSON.stringify({ event: "setGlobalSettings", context: uuid, payload: settings }));
+      }
+
+      function saveItem() {
+        if (!sd) return;
+        const settings = { index: parseInt($("index").value, 10) || 0 };
+        sd.send(JSON.stringify({ event: "setSettings", context: uuid, payload: settings }));
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        ["host", "port", "password"].forEach((id) => $(id).addEventListener("change", saveGlobal));
+        $("index").addEventListener("change", saveItem);
+      });
+    </script>
+  </body>
+</html>
