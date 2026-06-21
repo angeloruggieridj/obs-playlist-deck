@@ -168,7 +168,18 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install dependencies
         run: brew install cmake ninja
+
+      # --- OBS prebuilt universal deps (cached) ---
+      - name: Cache obs-deps
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/obs-deps
+            /tmp/obs-deps-qt6
+          key: obsdeps-mac-universal-${{ env.OBS_DEPS_VERSION }}-v1
       - name: Download universal OBS pre-built deps
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/obs-deps /tmp/obs-deps-qt6
           curl -fsSL \
@@ -177,7 +188,19 @@ jobs:
           curl -fsSL \
             "https://github.com/obsproject/obs-deps/releases/download/${{ env.OBS_DEPS_VERSION }}/macos-deps-qt6-${{ env.OBS_DEPS_VERSION }}-universal.tar.xz" \
             | tar -xJ -C /tmp/obs-deps-qt6
+
+      # --- OBS dev libs (universal, cached per OBS version) ---
+      # The expensive part: building libobs + obs-frontend-api universal from
+      # source. The installed dev tree lives at the fixed path /tmp/obs-dev, so
+      # the cache stays valid across runs (deps are also at fixed /tmp paths).
+      - name: Cache OBS dev
+        id: cache-obsdev
+        uses: actions/cache@v4
+        with:
+          path: /tmp/obs-dev
+          key: obsdev-mac-universal-${{ env.OBS_VERSION }}-v1
       - name: Clone OBS source
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: |
           git clone --depth=1 --branch ${{ env.OBS_VERSION }} \
             https://github.com/obsproject/obs-studio.git /tmp/obs
@@ -187,6 +210,7 @@ jobs:
           # drop it; we only need libobs + obs-frontend-api dev files.
           sed -i.bak 's/^\( *\)add_subdirectory(libobs-metal)/\1# disabled for dev build: add_subdirectory(libobs-metal)/' /tmp/obs/CMakeLists.txt
       - name: Configure OBS (universal)
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: |
           cmake -B /tmp/obs-build -S /tmp/obs \
             -G Xcode \
@@ -198,8 +222,10 @@ jobs:
             -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
             -DCMAKE_PREFIX_PATH="/tmp/obs-deps-qt6;/tmp/obs-deps"
       - name: Build OBS
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: cmake --build /tmp/obs-build --target obs-frontend-api --config Release --parallel
       - name: Install OBS dev
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: cmake --install /tmp/obs-build --config Release --component Development --prefix /tmp/obs-dev
       - name: Configure plugin (universal)
         run: |
