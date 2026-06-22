@@ -555,6 +555,15 @@ void PlaylistDock::onPrev() {
 
 void PlaylistDock::onTick() {
     if (!progress_) return;
+    // Only show progress for a clip this session has actually selected. Without
+    // this, on startup the bound media source still holds the file from the
+    // previous session and the counter would show that stale clip even though
+    // no playlist item is loaded.
+    if (playlist_.currentIndex() < 0) {
+        progress_->setValue(0);
+        timeLabel_->clear();
+        return;
+    }
     long long dur = controller_.currentDurationMs();
     long long cur = controller_.currentTimeMs();
     if (dur > 0 && cur >= 0) {
