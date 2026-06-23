@@ -376,6 +376,10 @@ jobs:
         run: |
           git clone --depth=1 --branch ${{ matrix.obs }} \
             https://github.com/obsproject/obs-studio.git /tmp/obs
+          # OBS 32.2's Linux helper calls add_dependencies(obs-studio <execs> <mods>)
+          # which errors when plugins/executables are disabled (empty lists).
+          # We only build obs-frontend-api, so guard that call.
+          sed -i 's|add_dependencies(${target} ${obs_executables} ${obs_modules})|if(obs_executables OR obs_modules)\n      add_dependencies(${target} ${obs_executables} ${obs_modules})\n    endif()|' /tmp/obs/cmake/linux/helpers.cmake || true
           # Keep the frontend enabled (obs-frontend-api lives in it on OBS 32.x);
           # only disable the heavy optional bits. Mirrors the macOS/Windows jobs.
           cmake -B /tmp/obs-build -S /tmp/obs -G Ninja \
