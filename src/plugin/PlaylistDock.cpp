@@ -294,22 +294,21 @@ void PlaylistDock::rebuildList() {
     QIcon playing = tintedIcon(":/icons/play.svg");
     for (int i = 0; i < playlist_.size(); ++i) {
         const auto& pi = playlist_.items()[i];
-        auto* item = new QListWidgetItem(itemText(i));
-        item->setData(Qt::UserRole, i); // model index, used to sync drag-reorder
         QString qpath = QString::fromStdString(pi.path);
-        if (!QFileInfo::exists(qpath)) {
-            item->setForeground(QBrush(QColor("#e06c75")));
-            item->setToolTip(qpath + "  (file not found)");
-        } else {
-            item->setToolTip(qpath);
-        }
+        bool missing = !QFileInfo::exists(qpath);
+        QString label = itemText(i);
+        if (missing) label += "  \xE2\x9A\xA0 " + T("FileNotFound"); // ⚠
+        auto* item = new QListWidgetItem(label);
+        item->setData(Qt::UserRole, i); // model index, used to sync drag-reorder
+        item->setToolTip(missing ? qpath + "  (" + T("FileNotFound") + ")" : qpath);
+        if (missing) item->setForeground(QBrush(QColor("#e06c75")));
         if (i == playlist_.currentIndex()) item->setIcon(playing);
         list_->addItem(item);
     }
-    if (playlist_.currentIndex() >= 0)
-        list_->setCurrentRow(playlist_.currentIndex());
-    else if (sel >= 0 && sel < playlist_.size())
-        list_->setCurrentRow(sel);
+    // Preserve the user's selection across rebuilds — do NOT force it onto the
+    // currently-playing item (that's marked with the ▶ icon). Reordering while
+    // another item plays must keep the selection where the user put it.
+    if (sel >= 0 && sel < playlist_.size()) list_->setCurrentRow(sel);
     list_->blockSignals(false);
     applyFilter();
     if (autoRestore_) saveSession();
@@ -649,13 +648,18 @@ void PlaylistDock::setLoadedPlaylist(const QString& path) {
 }
 
 void PlaylistDock::onSavePlaylist() {
+    QString selectedFilter;
     QString path = QFileDialog::getSaveFileName(this, "Save playlist", "",
-                                                "JSON (*.json);;M3U (*.m3u)");
+                                                "JSON (*.json);;M3U (*.m3u)", &selectedFilter);
     if (path.isEmpty()) return;
+    // Honor the chosen filter for the format (the dialog doesn't always append
+    // the extension), so picking "M3U" actually writes .m3u — not .json.
+    bool m3u = path.endsWith(".m3u", Qt::CaseInsensitive) ||
+               (!path.endsWith(".json", Qt::CaseInsensitive) &&
+                selectedFilter.contains("m3u", Qt::CaseInsensitive));
     if (!path.endsWith(".json", Qt::CaseInsensitive) && !path.endsWith(".m3u", Qt::CaseInsensitive))
-        path += ".json";
-    std::string text = path.endsWith(".m3u", Qt::CaseInsensitive)
-                           ? io::toM3u(playlist_.items())
+        path += m3u ? ".m3u" : ".json";
+    std::string text = m3u ? io::toM3u(playlist_.items())
                            : io::toJson(QFileInfo(path).completeBaseName().toStdString(),
                                         playlist_.items());
     QFile f(path);
