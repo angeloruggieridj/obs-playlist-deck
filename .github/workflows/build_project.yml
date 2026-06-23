@@ -361,6 +361,7 @@ jobs:
             libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shm0-dev \
             libxcb-xfixes0-dev libxcb-composite0-dev libxcb-xinput-dev \
             libxfixes-dev libxcomposite-dev libxinerama-dev libxss-dev \
+            libdrm-dev libva-dev libxcb-cursor-dev \
             libpci-dev libpulse-dev libudev-dev libasound2-dev
       - name: Cache OBS dev
         id: cache-obsdev
