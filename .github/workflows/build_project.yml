@@ -342,8 +342,9 @@ jobs:
         # OBS 30.x can't be CI-built on current runners (OBS-30 source vs the
         # runner's FFmpeg, and dev-install layout differences) — not a plugin
         # issue. The plugin's API needs (obs_frontend_add_custom_qdock) exist
-        # since OBS 30.0, but 31.0.0 is the CI-certified minimum.
-        obs: ["31.0.0"]
+        # since OBS 30.0, but 31.0.0 is the CI-certified minimum. 32.2.0-beta2
+        # is checked to confirm forward compatibility with the upcoming 32.2.
+        obs: ["31.0.0", "32.2.0-beta2"]
     steps:
       - uses: actions/checkout@v6
       - name: Install build deps
