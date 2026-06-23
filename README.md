@@ -60,8 +60,15 @@ Download your platform's build from the
 [**Releases**](https://github.com/angeloruggieridj/obs-playlist-deck/releases) page.
 
 ### Windows
-Extract the zip into your OBS install folder, so `obs-plugins/64bit/` and
-`data/obs-plugins/` merge with OBS's.
+Extract the zip into your per-user OBS plugins folder so you get
+`%APPDATA%\obs-studio\plugins\obs-playlist-deck\bin\64bit\obs-playlist-deck.dll`
+(and `…\obs-playlist-deck\data\`). No admin rights needed, and it survives OBS
+updates.
+
+```powershell
+Expand-Archive obs-playlist-deck-windows.zip -DestinationPath "$env:APPDATA\obs-studio\plugins"
+```
+Then restart OBS.
 
 ### Linux
 ```bash
