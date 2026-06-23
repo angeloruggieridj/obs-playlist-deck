@@ -20,6 +20,7 @@ public:
 
     bool setFileAndRestart(const std::string& path);
     bool setFileLoadOnly(const std::string& path); // set file, then pause on first frame
+    bool clearFile();                              // clear local_file + stop (no stale playback)
     long long currentDurationMs() const;           // -1 if unknown / not bound
     long long currentTimeMs() const;               // playback position, -1 if not bound
     bool isPlaying() const;

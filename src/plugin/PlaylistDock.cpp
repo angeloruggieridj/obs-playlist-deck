@@ -72,6 +72,10 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     buildUi();
     refreshSources();
     if (autoRestore_) loadSession();
+    // The bound media source persists its previous file across OBS restarts; if
+    // no playlist item is loaded, clear it so sending the source to Program does
+    // not replay the clip from before the last shutdown.
+    if (playlist_.currentIndex() < 0 && controller_.isBound()) controller_.clearFile();
     controller_.setOnMediaEnded([this]() {
         QMetaObject::invokeMethod(this, "onMediaEnded", Qt::QueuedConnection);
     });

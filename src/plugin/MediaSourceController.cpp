@@ -72,6 +72,17 @@ bool MediaSourceController::setFileLoadOnly(const std::string& path) {
     return true;
 }
 
+bool MediaSourceController::clearFile() {
+    if (!source_) return false;
+    obs_data_t* settings = obs_source_get_settings(source_);
+    obs_data_set_bool(settings, "is_local_file", true);
+    obs_data_set_string(settings, "local_file", "");
+    obs_source_update(source_, settings);
+    obs_data_release(settings);
+    obs_source_media_stop(source_);
+    return true;
+}
+
 long long MediaSourceController::currentDurationMs() const {
     if (!source_) return -1;
     int64_t d = obs_source_media_get_duration(source_);
