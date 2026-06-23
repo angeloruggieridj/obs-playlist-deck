@@ -350,7 +350,7 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config \
+          sudo apt-get install -y cmake ninja-build pkg-config extra-cmake-modules \
             qt6-base-dev qt6-base-private-dev qt6-svg-dev \
             libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev \
             libavfilter-dev libswscale-dev libswresample-dev libx264-dev \
