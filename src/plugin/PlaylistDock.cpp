@@ -83,7 +83,9 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
         QMetaObject::invokeMethod(this, "onSourceDeactivated", Qt::QueuedConnection);
     });
     registerHotkeys();
-    checkForUpdate();
+    // OBS is still constructing its frontend here. Defer the request until the
+    // event loop is running so the asynchronous reply can be delivered.
+    QTimer::singleShot(0, this, &PlaylistDock::checkForUpdate);
 
     uiTimer_ = new QTimer(this);
     uiTimer_->setInterval(500);
@@ -836,10 +838,21 @@ void PlaylistDock::checkForUpdate() {
     net_ = new QNetworkAccessManager(this);
     QNetworkRequest req((QUrl(QString::fromUtf8(kLatestApi))));
     req.setHeader(QNetworkRequest::UserAgentHeader, "obs-playlist-deck");
+    req.setRawHeader("Accept", "application/vnd.github+json");
+    req.setRawHeader("X-GitHub-Api-Version", "2022-11-28");
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::NoLessSafeRedirectPolicy);
     QNetworkReply* reply = net_->get(req);
+    QTimer::singleShot(10000, reply, [reply]() {
+        if (reply->isRunning()) reply->abort();
+    });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) return;
+        if (reply->error() != QNetworkReply::NoError) {
+            blog(LOG_WARNING, "Playlist Deck update check failed: %s",
+                 qPrintable(reply->errorString()));
+            return;
+        }
         QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
         if (!doc.isObject()) return;
         QString tag = doc.object().value("tag_name").toString();
