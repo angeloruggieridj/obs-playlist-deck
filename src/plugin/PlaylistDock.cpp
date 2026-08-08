@@ -108,6 +108,11 @@ void PlaylistDock::shutdown() {
     if (net_) net_->disconnect();
 }
 
+void PlaylistDock::releaseSource() {
+    pendingStageNext_ = false;
+    controller_.unbind();
+}
+
 QIcon PlaylistDock::tintedIcon(const QString& resource) const {
     QSvgRenderer renderer(resource);
     const int logical = 16;

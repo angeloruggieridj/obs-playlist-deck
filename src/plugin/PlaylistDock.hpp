@@ -22,6 +22,9 @@ public:
     ~PlaylistDock() override;
 
     void refreshSources();
+    // Releases the strong OBS source reference before its scene collection is
+    // unloaded. The selector is refreshed after the new collection loads.
+    void releaseSource();
     void shutdown();
 
     // Remote control entry points (invoked from the obs-websocket vendor API on

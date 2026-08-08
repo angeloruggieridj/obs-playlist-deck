@@ -29,8 +29,14 @@ static void on_frontend_event(enum obs_frontend_event event, void*) {
     }
     case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED:
     case OBS_FRONTEND_EVENT_SCENE_CHANGED:
+    case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED:
     case OBS_FRONTEND_EVENT_PROFILE_CHANGED:
         if (g_dock) g_dock->refreshSources();
+        break;
+    case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING:
+        // The dock keeps a strong obs_source_t reference while bound. It must
+        // be released before OBS begins unloading the outgoing collection.
+        if (g_dock) g_dock->releaseSource();
         break;
     case OBS_FRONTEND_EVENT_EXIT:
         // Release libobs resources while libobs is still alive, before Qt tears
