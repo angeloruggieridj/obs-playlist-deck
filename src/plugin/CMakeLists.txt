@@ -3,7 +3,7 @@ if(NOT libobs_FOUND)
   find_package(LibObs REQUIRED)
 endif()
 find_package(obs-frontend-api REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Svg Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Svg)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -24,8 +24,20 @@ target_link_libraries(obs-playlist-deck PRIVATE
   Qt6::Core
   Qt6::Widgets
   Qt6::Svg
-  Qt6::Network
 )
+
+# The update check speaks HTTPS through libcurl, not Qt Network. OBS ships no Qt
+# TLS backend plugin on Windows, so every QNetworkAccessManager request there
+# dies with "TLS initialization failed"; libcurl is bundled with OBS on all
+# three platforms and carries its own TLS.
+find_package(CURL)
+if(CURL_FOUND)
+  message(STATUS "Playlist Deck: update check enabled (libcurl)")
+  target_compile_definitions(obs-playlist-deck PRIVATE HAVE_CURL=1)
+  target_link_libraries(obs-playlist-deck PRIVATE CURL::libcurl)
+else()
+  message(WARNING "Playlist Deck: libcurl not found - update check disabled")
+endif()
 
 target_compile_definitions(obs-playlist-deck PRIVATE PLD_VERSION="${PROJECT_VERSION}")
 

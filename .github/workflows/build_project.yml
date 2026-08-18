@@ -38,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libobs-dev qt6-base-dev qt6-svg-dev cmake ninja-build \
-            libavformat-dev libavutil-dev
+            libavformat-dev libavutil-dev libcurl4-openssl-dev
       - name: Configure
         run: |
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -282,8 +282,8 @@ jobs:
             <key>CFBundleIdentifier</key><string>com.angeloruggieridj.obs-playlist-deck</string>
             <key>CFBundleName</key><string>Playlist Deck</string>
             <key>CFBundlePackageType</key><string>BNDL</string>
-            <key>CFBundleShortVersionString</key><string>1.2.2</string>
-            <key>CFBundleVersion</key><string>1.2.2</string>
+            <key>CFBundleShortVersionString</key><string>1.2.3</string>
+            <key>CFBundleVersion</key><string>1.2.3</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
           </dict>
           </plist>

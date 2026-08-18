@@ -31,9 +31,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
@@ -49,6 +46,10 @@
 #include <thread>
 #include <utility>
 
+#if HAVE_CURL
+#include <curl/curl.h>
+#endif
+
 #ifndef PLD_VERSION
 #define PLD_VERSION "0.0.0"
 #endif
@@ -62,6 +63,14 @@ const char* kLatestApi =
 
 // Localized string lookup (falls back to the key if a translation is missing).
 QString T(const char* key) { return QString::fromUtf8(obs_module_text(key)); }
+
+#if HAVE_CURL
+size_t curlAppend(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    const size_t bytes = size * nmemb;
+    static_cast<std::string*>(userdata)->append(ptr, bytes);
+    return bytes;
+}
+#endif
 }
 
 PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
@@ -85,7 +94,7 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     registerHotkeys();
     // OBS is still constructing its frontend here. Defer the request until the
     // event loop is running so the asynchronous reply can be delivered.
-    QTimer::singleShot(0, this, &PlaylistDock::checkForUpdate);
+    QTimer::singleShot(0, this, [this]() { checkForUpdate(false); });
 
     uiTimer_ = new QTimer(this);
     uiTimer_->setInterval(500);
@@ -107,7 +116,6 @@ void PlaylistDock::shutdown() {
     controller_.setOnMediaEnded(nullptr);
     controller_.setOnDeactivated(nullptr);
     controller_.unbind();
-    if (net_) net_->disconnect();
 }
 
 void PlaylistDock::releaseSource() {
@@ -858,6 +866,13 @@ void PlaylistDock::onOpenSettings() {
     langCombo->setCurrentIndex(li >= 0 ? li : 0);
     form->addRow(new QLabel(T("Settings.Language")), langCombo);
 
+    // The automatic check runs once at OBS startup; this is the way to ask again
+    // without restarting, and it reports the outcome in the status line.
+    auto* updateBtn = new QPushButton(T("Btn.CheckUpdates"));
+    updateBtn->setFocusPolicy(Qt::NoFocus);
+    connect(updateBtn, &QPushButton::clicked, this, [this]() { checkForUpdate(true); });
+    form->addRow(updateBtn);
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     form->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
@@ -875,37 +890,83 @@ void PlaylistDock::onOpenSettings() {
     setStatus(T("Settings.Saved"));
 }
 
-void PlaylistDock::checkForUpdate() {
-    net_ = new QNetworkAccessManager(this);
-    QNetworkRequest req((QUrl(QString::fromUtf8(kLatestApi))));
-    req.setHeader(QNetworkRequest::UserAgentHeader, "obs-playlist-deck");
-    req.setRawHeader("Accept", "application/vnd.github+json");
-    req.setRawHeader("X-GitHub-Api-Version", "2022-11-28");
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                     QNetworkRequest::NoLessSafeRedirectPolicy);
-    QNetworkReply* reply = net_->get(req);
-    QTimer::singleShot(10000, reply, [reply]() {
-        if (reply->isRunning()) reply->abort();
-    });
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            blog(LOG_WARNING, "Playlist Deck update check failed: %s",
-                 qPrintable(reply->errorString()));
-            return;
+void PlaylistDock::checkForUpdate(bool manual) {
+#if HAVE_CURL
+    if (manual) setStatus(T("Status.UpdateChecking"));
+    QPointer<PlaylistDock> self(this);
+    // curl_easy_perform blocks, so it runs off the UI thread and reports back
+    // through the event loop.
+    std::thread([self, manual]() {
+        std::string body;
+        std::string error;
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            error = "curl_easy_init failed";
+        } else {
+            curl_slist* headers = nullptr;
+            headers = curl_slist_append(headers, "Accept: application/vnd.github+json");
+            headers = curl_slist_append(headers, "X-GitHub-Api-Version: 2022-11-28");
+            curl_easy_setopt(curl, CURLOPT_URL, kLatestApi);
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+            curl_easy_setopt(curl, CURLOPT_USERAGENT, "obs-playlist-deck");
+            curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &curlAppend);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+            const CURLcode rc = curl_easy_perform(curl);
+            if (rc != CURLE_OK) {
+                error = curl_easy_strerror(rc);
+            } else {
+                long status = 0;
+                curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+                // A rate-limited GitHub answers 403 with a JSON body that has no
+                // tag_name, which would otherwise look like "no update".
+                if (status != 200) error = "HTTP " + std::to_string(status);
+            }
+            curl_slist_free_all(headers);
+            curl_easy_cleanup(curl);
         }
-        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-        if (!doc.isObject()) return;
-        QString tag = doc.object().value("tag_name").toString();
-        if (tag.isEmpty()) return;
-        if (pld::isNewerVersion(tag.toStdString(), PLD_VERSION)) {
-            versionLabel_->setText(
-                QStringLiteral("v%1 — <a href=\"%2\">update to %3 \xE2\x86\x97</a>")
-                    .arg(PLD_VERSION)
-                    .arg(QString::fromUtf8(kReleasesUrl))
-                    .arg(tag));
-        }
-    });
+        const QString qbody = QString::fromStdString(body);
+        const QString qerror = QString::fromStdString(error);
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, qbody, qerror, manual]() {
+                if (self) self->applyUpdateCheckResult(qbody, qerror, manual);
+            },
+            Qt::QueuedConnection);
+    }).detach();
+#else
+    blog(LOG_WARNING, "Playlist Deck built without libcurl; update check unavailable");
+    if (manual) setStatus(T("Status.UpdateCheckFailed").arg("libcurl"), true);
+#endif
+}
+
+void PlaylistDock::applyUpdateCheckResult(const QString& body, const QString& error, bool manual) {
+    if (!error.isEmpty()) {
+        blog(LOG_WARNING, "Playlist Deck update check failed: %s", qPrintable(error));
+        if (manual) setStatus(T("Status.UpdateCheckFailed").arg(error), true);
+        return;
+    }
+    const QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+    if (!doc.isObject()) {
+        blog(LOG_WARNING, "Playlist Deck update check: unexpected response");
+        if (manual) setStatus(T("Status.UpdateCheckFailed").arg("bad response"), true);
+        return;
+    }
+    const QString tag = doc.object().value("tag_name").toString();
+    if (tag.isEmpty()) {
+        if (manual) setStatus(T("Status.UpdateCheckFailed").arg("no tag_name"), true);
+        return;
+    }
+    if (pld::isNewerVersion(tag.toStdString(), PLD_VERSION)) {
+        versionLabel_->setText(QStringLiteral("v%1 — <a href=\"%2\">update to %3 \xE2\x86\x97</a>")
+                                   .arg(PLD_VERSION)
+                                   .arg(QString::fromUtf8(kReleasesUrl))
+                                   .arg(tag));
+        setStatus(T("Status.UpdateAvailable").arg(tag));
+    } else if (manual) {
+        setStatus(T("Status.UpToDate").arg(PLD_VERSION));
+    }
 }
 
 // ---- Hotkeys -------------------------------------------------------------

@@ -12,7 +12,6 @@ class QLabel;
 class QLineEdit;
 class QProgressBar;
 class QTimer;
-class QNetworkAccessManager;
 class PlaylistListWidget;
 
 class PlaylistDock : public QDockWidget {
@@ -77,7 +76,10 @@ private:
     void setLoadedPlaylist(const QString& path);
     void setStatus(const QString& msg, bool error = false);
     QIcon tintedIcon(const QString& resource) const;
-    void checkForUpdate();
+    // manual == true means the user asked from Settings, so the outcome is
+    // reported in the status line instead of only the OBS log.
+    void checkForUpdate(bool manual);
+    void applyUpdateCheckResult(const QString& body, const QString& error, bool manual);
     void startBackgroundProbe(const QStringList& paths);
     // Clears the bound source's file only when this plugin is the one that put
     // it there. A path the user configured in OBS is never emptied.
@@ -121,7 +123,6 @@ private:
     QLabel* status_ = nullptr;
     QLabel* versionLabel_ = nullptr;
     QTimer* uiTimer_ = nullptr;
-    QNetworkAccessManager* net_ = nullptr;
 
     obs_hotkey_id hkNext_ = OBS_INVALID_HOTKEY_ID;
     obs_hotkey_id hkPrev_ = OBS_INVALID_HOTKEY_ID;
