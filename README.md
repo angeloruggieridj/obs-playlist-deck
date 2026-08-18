@@ -96,6 +96,13 @@ Then open OBS → the **Playlist Deck** dock appears under the *Docks* menu.
 4. Choose an **End-of-clip** behavior, and use **Save** / **Open** to keep
    playlists as files.
 
+The dropdown lists only the media sources of the **active scene collection**. If
+you switch to a collection that has no source by the configured name, the
+dropdown shows *“No source configured”* and the deck stays unbound — it never
+picks a source for you, and never touches a file path you set up in OBS. Your
+choice is remembered, so it comes back when you return to the collection that
+owns that source.
+
 ## End-of-clip modes
 
 | Mode | Behavior |

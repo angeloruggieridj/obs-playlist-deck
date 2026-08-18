@@ -75,7 +75,7 @@ PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
     // The bound media source persists its previous file across OBS restarts; if
     // no playlist item is loaded, clear it so sending the source to Program does
     // not replay the clip from before the last shutdown.
-    if (playlist_.currentIndex() < 0 && controller_.isBound()) controller_.clearFile();
+    clearStalePluginFile();
     controller_.setOnMediaEnded([this]() {
         QMetaObject::invokeMethod(this, "onMediaEnded", Qt::QueuedConnection);
     });
@@ -112,7 +112,25 @@ void PlaylistDock::shutdown() {
 
 void PlaylistDock::releaseSource() {
     pendingStageNext_ = false;
+    // Keep the user's choice across the collection swap so it is restored when
+    // they switch back to the collection that owns this source.
+    if (controller_.isBound()) pendingSource_ = QString::fromStdString(controller_.boundName());
     controller_.unbind();
+}
+
+void PlaylistDock::clearStalePluginFile() {
+    if (!controller_.isBound() || playlist_.currentIndex() >= 0) return;
+    const std::string current = controller_.currentFile();
+    if (current.empty()) return;
+    // Only wipe a file this plugin loaded from the playlist. Anything else was
+    // configured by the user in OBS itself, and emptying it would silently
+    // destroy their scene setup.
+    for (const auto& it : playlist_.items()) {
+        if (it.path == current) {
+            controller_.clearFile();
+            return;
+        }
+    }
 }
 
 QIcon PlaylistDock::tintedIcon(const QString& resource) const {
@@ -338,7 +356,7 @@ void PlaylistDock::playIndex(int row) {
     const auto* it = playlist_.current();
     if (!it) return;
     if (!controller_.isBound()) {
-        setStatus("No media source bound.", true);
+        setStatus(T("Status.NoSourceConfigured"), true);
         rebuildList();
         return;
     }
@@ -356,7 +374,7 @@ void PlaylistDock::loadIndex(int row) {
     const auto* it = playlist_.current();
     if (!it) return;
     if (!controller_.isBound()) {
-        setStatus("No media source bound.", true);
+        setStatus(T("Status.NoSourceConfigured"), true);
         rebuildList();
         return;
     }
@@ -591,27 +609,47 @@ void PlaylistDock::onTick() {
 }
 
 void PlaylistDock::onSourceChanged(int) {
-    QString name = sourceCombo_->currentText();
+    // The name lives in the item data, not the text: index 0 is the "no source
+    // configured" placeholder, whose data is deliberately empty.
+    const QString name = sourceCombo_->currentData().toString();
     if (name.isEmpty()) {
         controller_.unbind();
+        setStatus(T("Status.NoSourceConfigured"));
         return;
     }
     controller_.bind(name.toStdString());
-    setStatus(QStringLiteral("Bound to: %1").arg(name));
-    saveSettings();
+    setStatus(T("Status.BoundTo").arg(name));
+    // Only a deliberate pick updates the remembered source. A programmatic
+    // refresh must never overwrite it, or a scene collection that happens to
+    // lack the chosen source would erase the user's configuration.
+    if (!refreshing_) {
+        pendingSource_ = name;
+        saveSettings();
+    }
 }
 
 void PlaylistDock::refreshSources() {
-    QString prev = sourceCombo_->currentText();
-    if (prev.isEmpty() && !pendingSource_.isEmpty()) prev = pendingSource_;
+    // Track what the user asked for, not what the combo currently shows.
+    QString wanted = sourceCombo_->currentData().toString();
+    if (wanted.isEmpty()) wanted = pendingSource_;
+
+    refreshing_ = true;
     sourceCombo_->blockSignals(true);
     sourceCombo_->clear();
-    for (const auto& n : MediaSourceController::listMediaSources())
-        sourceCombo_->addItem(QString::fromStdString(n));
-    int idx = sourceCombo_->findText(prev);
-    if (idx >= 0) sourceCombo_->setCurrentIndex(idx);
+    // Index 0 is always the explicit "nothing configured" entry. Without it,
+    // QComboBox auto-selects the first real source as soon as one is added, so
+    // switching to a scene collection that lacks the configured source would
+    // silently bind an arbitrary media source and then write over its file.
+    sourceCombo_->addItem(T("NoSourceConfigured"), QString());
+    for (const auto& n : MediaSourceController::listMediaSources()) {
+        const QString name = QString::fromStdString(n);
+        sourceCombo_->addItem(name, name);
+    }
+    const int idx = wanted.isEmpty() ? 0 : sourceCombo_->findData(wanted);
+    sourceCombo_->setCurrentIndex(idx >= 0 ? idx : 0);
     sourceCombo_->blockSignals(false);
     onSourceChanged(sourceCombo_->currentIndex());
+    refreshing_ = false;
 }
 
 // ---- Saved-playlist file handling ----------------------------------------
@@ -710,7 +748,10 @@ void PlaylistDock::saveSettings() const {
     if (path.isEmpty()) return;
     QJsonObject o;
     o["mode"] = static_cast<int>(mode_);
-    o["source"] = sourceCombo_ ? sourceCombo_->currentText() : QString();
+    // Persist the remembered choice, never the combo's current text: that is the
+    // "no source configured" placeholder whenever the active scene collection
+    // does not contain the chosen source.
+    o["source"] = pendingSource_;
     o["enableProbe"] = enableProbe_;
     o["autoRestore"] = autoRestore_;
     o["language"] = language_;

@@ -79,6 +79,9 @@ private:
     QIcon tintedIcon(const QString& resource) const;
     void checkForUpdate();
     void startBackgroundProbe(const QStringList& paths);
+    // Clears the bound source's file only when this plugin is the one that put
+    // it there. A path the user configured in OBS is never emptied.
+    void clearStalePluginFile();
 
     QString settingsPath() const;
     void saveSettings() const;
@@ -95,8 +98,12 @@ private:
     pld::Playlist playlist_;
     MediaSourceController controller_;
     EndMode mode_ = PlayNext;
+    // The media source the user chose. Survives scene collection switches where
+    // the incoming collection has no source by that name, so the binding comes
+    // back when they switch to a collection that does.
     QString pendingSource_;
     bool obsShutdown_ = false;
+    bool refreshing_ = false; // true while refreshSources() repopulates the combo
     bool pendingStageNext_ = false;
     bool enableProbe_ = true;
     bool autoRestore_ = false;

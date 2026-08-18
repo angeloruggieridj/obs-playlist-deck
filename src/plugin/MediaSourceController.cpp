@@ -83,6 +83,15 @@ bool MediaSourceController::clearFile() {
     return true;
 }
 
+std::string MediaSourceController::currentFile() const {
+    if (!source_) return {};
+    obs_data_t* settings = obs_source_get_settings(source_);
+    const char* f = obs_data_get_string(settings, "local_file");
+    std::string out = f ? f : "";
+    obs_data_release(settings);
+    return out;
+}
+
 long long MediaSourceController::currentDurationMs() const {
     if (!source_) return -1;
     int64_t d = obs_source_media_get_duration(source_);
