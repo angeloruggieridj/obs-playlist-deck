@@ -1,5 +1,5 @@
 #pragma once
-#include <QDockWidget>
+#include <QWidget>
 #include <QIcon>
 #include <QString>
 #include <random>
@@ -14,11 +14,23 @@ class QProgressBar;
 class QTimer;
 class PlaylistListWidget;
 
-class PlaylistDock : public QDockWidget {
+// Plain widget, not a QDockWidget: OBS wraps it in its own dock through
+// obs_frontend_add_dock_by_id(), which is what puts the entry in the Docks
+// menu and saves the dock's visibility and geometry across restarts.
+class PlaylistDock : public QWidget {
     Q_OBJECT
 public:
     explicit PlaylistDock(QWidget* parent = nullptr);
     ~PlaylistDock() override;
+
+    // Localized dock title, handed to obs_frontend_add_dock_by_id().
+    static QString dockTitle();
+
+    // Second-stage init, run on OBS_FRONTEND_EVENT_FINISHED_LOADING. The dock
+    // is registered from obs_module_load() so OBS restores its saved state, but
+    // everything touching sources, the session or hotkeys needs the frontend to
+    // have finished loading first.
+    void frontendLoaded();
 
     void refreshSources();
     // Releases the strong OBS source reference before its scene collection is
@@ -94,6 +106,9 @@ private:
     void saveSession() const;
     void loadSession();
 
+    // Retitles the QDockWidget OBS wrapped this widget in (language change).
+    void applyDockTitle();
+
     void registerHotkeys();
     void unregisterHotkeys();
 
@@ -113,6 +128,7 @@ private:
     QString loadedPath_;        // currently loaded playlist file, for label restore
     std::mt19937 rng_{std::random_device{}()};
 
+    QWidget* content_ = nullptr; // what buildUi() fills; replaced on rebuild
     QComboBox* sourceCombo_ = nullptr;
     PlaylistListWidget* list_ = nullptr;
     QLineEdit* filterEdit_ = nullptr;

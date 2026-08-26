@@ -20,13 +20,11 @@ static constexpr const char* DOCK_ID = "obs-playlist-deck-dock";
 
 static void on_frontend_event(enum obs_frontend_event event, void*) {
     switch (event) {
-    case OBS_FRONTEND_EVENT_FINISHED_LOADING: {
-        auto* mw = static_cast<QMainWindow*>(obs_frontend_get_main_window());
-        g_dock = new PlaylistDock(mw);
-        obs_frontend_add_custom_qdock(DOCK_ID, g_dock);
-        blog(LOG_INFO, "[obs-playlist-deck] dock registered");
+    case OBS_FRONTEND_EVENT_FINISHED_LOADING:
+        // The dock already exists (registered from obs_module_load); only now is
+        // there a scene collection to bind to.
+        if (g_dock) g_dock->frontendLoaded();
         break;
-    }
     case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED:
     case OBS_FRONTEND_EVENT_SCENE_CHANGED:
     case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED:
@@ -111,6 +109,24 @@ static void register_vendor() {
 bool obs_module_load(void) {
     blog(LOG_INFO, "[obs-playlist-deck] loaded");
     obs_frontend_add_event_callback(on_frontend_event, nullptr);
+
+    // Register the dock here, not on FINISHED_LOADING: OBS restores the saved
+    // dock layout right after all modules are loaded and before that event, so a
+    // dock added later is never given back its visibility, position or size.
+    // obs_frontend_add_dock_by_id() is also what adds the checkable entry to the
+    // Docks menu; the custom-qdock API deliberately adds neither, leaving the
+    // dock unmanaged and with no way to toggle it from the UI.
+    auto* mw = static_cast<QMainWindow*>(obs_frontend_get_main_window());
+    g_dock = new PlaylistDock(mw);
+    if (!obs_frontend_add_dock_by_id(DOCK_ID, PlaylistDock::dockTitle().toUtf8().constData(), g_dock)) {
+        blog(LOG_ERROR, "[obs-playlist-deck] dock registration failed");
+        delete g_dock;
+        g_dock = nullptr;
+        // obs_module_unload() is not called when load fails, so undo the callback here.
+        obs_frontend_remove_event_callback(on_frontend_event, nullptr);
+        return false;
+    }
+    blog(LOG_INFO, "[obs-playlist-deck] dock registered");
     return true;
 }
 

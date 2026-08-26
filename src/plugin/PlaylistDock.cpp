@@ -19,6 +19,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDockWidget>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -73,33 +74,47 @@ size_t curlAppend(char* ptr, size_t size, size_t nmemb, void* userdata) {
 #endif
 }
 
-PlaylistDock::PlaylistDock(QWidget* parent) : QDockWidget(parent) {
-    setWindowTitle(QString::fromUtf8(obs_module_text("PlaylistDeck")));
-    setObjectName("obs-playlist-deck-dock");
+QString PlaylistDock::dockTitle() {
+    return QString::fromUtf8(obs_module_text("PlaylistDeck"));
+}
+
+void PlaylistDock::applyDockTitle() {
+    // OBS owns the QDockWidget this widget lives in; retitle it through the parent.
+    if (auto* dock = qobject_cast<QDockWidget*>(parentWidget()))
+        dock->setWindowTitle(dockTitle());
+}
+
+// The constructor runs during obs_module_load(), before any scene collection
+// exists. Keep it to settings and UI only; source-, session- and hotkey-related
+// setup happens in frontendLoaded().
+PlaylistDock::PlaylistDock(QWidget* parent) : QWidget(parent) {
+    setObjectName("obs-playlist-deck-widget");
     loadSettings();
     applyLocale();
     buildUi();
-    refreshSources();
-    if (autoRestore_) loadSession();
-    // The bound media source persists its previous file across OBS restarts; if
-    // no playlist item is loaded, clear it so sending the source to Program does
-    // not replay the clip from before the last shutdown.
-    clearStalePluginFile();
     controller_.setOnMediaEnded([this]() {
         QMetaObject::invokeMethod(this, "onMediaEnded", Qt::QueuedConnection);
     });
     controller_.setOnDeactivated([this]() {
         QMetaObject::invokeMethod(this, "onSourceDeactivated", Qt::QueuedConnection);
     });
-    registerHotkeys();
-    // OBS is still constructing its frontend here. Defer the request until the
-    // event loop is running so the asynchronous reply can be delivered.
-    QTimer::singleShot(0, this, [this]() { checkForUpdate(false); });
 
     uiTimer_ = new QTimer(this);
     uiTimer_->setInterval(500);
     connect(uiTimer_, &QTimer::timeout, this, &PlaylistDock::onTick);
     uiTimer_->start();
+}
+
+void PlaylistDock::frontendLoaded() {
+    refreshSources();
+    if (autoRestore_) loadSession();
+    // The bound media source persists its previous file across OBS restarts; if
+    // no playlist item is loaded, clear it so sending the source to Program does
+    // not replay the clip from before the last shutdown.
+    clearStalePluginFile();
+    registerHotkeys();
+    // Defer the request so the asynchronous reply lands on a settled event loop.
+    QTimer::singleShot(0, this, [this]() { checkForUpdate(false); });
 }
 
 PlaylistDock::~PlaylistDock() {
@@ -282,7 +297,20 @@ void PlaylistDock::buildUi() {
     verRow->addWidget(versionLabel_);
     col->addLayout(verRow);
 
-    setWidget(root);
+    // buildUi() runs again on a language change, so swap the previous contents
+    // out rather than stacking a second widget in the layout.
+    auto* outer = qobject_cast<QVBoxLayout*>(layout());
+    if (!outer) {
+        outer = new QVBoxLayout(this);
+        outer->setContentsMargins(0, 0, 0, 0);
+    }
+    if (content_) {
+        outer->removeWidget(content_);
+        content_->hide();
+        content_->deleteLater();
+    }
+    outer->addWidget(root);
+    content_ = root;
 
     connect(settingsBtn, &QPushButton::clicked, this, &PlaylistDock::onOpenSettings);
 
@@ -795,7 +823,7 @@ void PlaylistDock::applyLocaleAndRebuild() {
     applyLocale();
     QString loaded = loadedPath_;
     buildUi(); // recreates all widgets with the new language
-    setWindowTitle(QString::fromUtf8(obs_module_text("PlaylistDeck")));
+    applyDockTitle();
     refreshSources();
     rebuildList();
     setLoadedPlaylist(loaded);
