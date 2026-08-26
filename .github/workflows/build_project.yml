@@ -460,15 +460,9 @@ jobs:
       # auto-generated commit list.
       - name: Release notes from CHANGELOG
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          awk -v v="$version" '
-            index($0, "## [" v "]") == 1 { found = 1; next }
-            found && /^## \[/ { exit }
-            found && /^\[[0-9]/ { exit }
-            found { print }
-          ' CHANGELOG.md | sed -e '/./,$!d' > release-notes.md
+          bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME" CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
-            echo "::warning::no CHANGELOG section for $version; linking the file instead"
+            echo "::warning::no CHANGELOG section for $GITHUB_REF_NAME; linking the file instead"
             printf 'See [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md).\n' \
               "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > release-notes.md
           fi
