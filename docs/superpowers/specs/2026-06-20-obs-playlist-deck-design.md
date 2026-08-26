@@ -49,7 +49,10 @@ src/obs/         OBS glue: enumerate media sources, set local_file + restart,
                  media_ended signal subscription, hotkey registration
 src/ui/          PlaylistDockWidget (Qt6 Widgets): list, source dropdown,
                  transport buttons, named-playlist controls, import/export
-plugin-main.cpp  OBS_DECLARE_MODULE; registers the dock on
+plugin-main.cpp  OBS_DECLARE_MODULE; registers the dock in obs_module_load()
+                 via obs_frontend_add_dock_by_id() (early enough for OBS to
+                 restore the saved dock layout, and the API that adds the
+                 Docks-menu toggle); scene-collection-dependent setup runs on
                  OBS_FRONTEND_EVENT_FINISHED_LOADING
 ```
 

@@ -33,6 +33,7 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
 - [Localization](#localization)
 - [Compatibility](#compatibility)
 - [Building from source](#building-from-source)
+- [Changelog](#changelog)
 - [License](#license)
 
 ## Features
@@ -88,6 +89,10 @@ xattr -dr com.apple.quarantine "$PLUGIN_DIR/obs-playlist-deck.plugin"
 Then open OBS → the **Playlist Deck** dock appears under the *Docks* menu.
 
 ## Usage
+
+Show or hide the deck from OBS's **Docks** menu — it has a checkable *Playlist
+Deck* entry, and OBS remembers whether it was open, where it was docked and how
+big it was the next time you start.
 
 1. Add a **Media Source** (or VLC Source) to a scene in OBS.
 2. In the Playlist Deck dock, select it from the **Media source** dropdown.
@@ -164,6 +169,10 @@ builds OBS dev libraries from source (cached per OBS version) and the plugin per
 platform, renders the Stream Deck icons and packages the companion, and runs an
 on-demand `compat` matrix against older OBS SDKs. See
 [`docs/superpowers/`](docs/superpowers/) for the design spec and plan.
+
+## Changelog
+
+Release-by-release notes live in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
