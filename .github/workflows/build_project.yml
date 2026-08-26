@@ -448,16 +448,36 @@ jobs:
       - streamdeck
     runs-on: ubuntu-24.04
     steps:
+      # Checkout first: download-artifact writes into the workspace and checkout
+      # would wipe it.
+      - uses: actions/checkout@v6
       - name: Download packaged artifacts
         uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
+      # The release body is this version's CHANGELOG section, not GitHub's
+      # auto-generated commit list.
+      - name: Release notes from CHANGELOG
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found && /^\[[0-9]/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::no CHANGELOG section for $version; linking the file instead"
+            printf 'See [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md).\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > release-notes.md
+          fi
+          cat release-notes.md
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
+          body_path: release-notes.md
           files: |
             release-assets/obs-playlist-deck-linux-x86_64.tar.gz
             release-assets/obs-playlist-deck-windows.zip
