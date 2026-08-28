@@ -507,13 +507,39 @@ jobs:
       # VirusTotal API key in the VT_API_KEY secret; without one this is skipped
       # and the release still publishes.
       - name: Scan the packages with VirusTotal
+        id: vt
         if: ${{ env.VT_API_KEY != '' }}
         uses: crazy-max/ghaction-virustotal@v4
         with:
           vt_api_key: ${{ secrets.VT_API_KEY }}
-          update_release_body: true
           files: |
             release-assets/obs-playlist-deck-linux-x86_64.tar.gz
             release-assets/obs-playlist-deck-windows.zip
             release-assets/obs-playlist-deck-macos-universal.tar.gz
             release-assets/obs-playlist-deck-streamdeck.zip
+      # The action's own update_release_body only fires on a "release" event, and
+      # this workflow runs on a tag push, so append the reports here instead.
+      - name: Link the VirusTotal reports from the release
+        if: ${{ steps.vt.outputs.analysis != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANALYSIS: ${{ steps.vt.outputs.analysis }}
+        run: |
+          # analysis is "path=url" pairs joined by commas; the URLs carry none.
+          line='- **VirusTotal**: '
+          sep=''
+          IFS=',' read -ra rows <<< "$ANALYSIS"
+          for row in "${rows[@]}"; do
+            line="${line}${sep}[$(basename "${row%%=*}")](${row#*=})"
+            sep=', '
+          done
+          {
+            echo ''
+            echo '### Verification'
+            echo ''
+            echo '- **Checksums**: `SHA256SUMS.txt`, published alongside these assets.'
+            echo "- **Provenance**: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
+            echo "${line}."
+          } >> release-notes.md
+          cat release-notes.md
+          gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
