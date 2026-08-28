@@ -37,6 +37,7 @@
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSize>
 #include <QSvgRenderer>
 #include <QTimer>
 #include <QUrl>
@@ -64,6 +65,12 @@ const char* kLatestApi =
 
 // Localized string lookup (falls back to the key if a translation is missing).
 QString T(const char* key) { return QString::fromUtf8(obs_module_text(key)); }
+
+// Toolbar metrics, in logical pixels. The glyph matches what tintedIcon()
+// rasterizes; the square keeps a row of icon-only buttons as narrow as the dock
+// allows while staying a comfortable click target.
+constexpr int kIconPx = 16;
+constexpr int kButtonPx = 26;
 
 #if HAVE_CURL
 size_t curlAppend(char* ptr, size_t size, size_t nmemb, void* userdata) {
@@ -158,7 +165,7 @@ void PlaylistDock::clearStalePluginFile() {
 
 QIcon PlaylistDock::tintedIcon(const QString& resource) const {
     QSvgRenderer renderer(resource);
-    const int logical = 16;
+    const int logical = kIconPx;
     const qreal dpr = devicePixelRatioF();
     QPixmap pm(static_cast<int>(logical * dpr), static_cast<int>(logical * dpr));
     pm.fill(Qt::transparent);
@@ -190,10 +197,17 @@ void PlaylistDock::buildUi() {
         return l;
     };
 
-    // Real push button with a tinted icon beside its text.
-    auto mk = [this](const QString& icon, const QString& text, const QString& tip) {
-        auto* b = new QPushButton(tintedIcon(icon), " " + text);
+    // Icon-only push button. Dropping the caption is what lets a full row of
+    // controls fit a narrow dock; the localized description moves to the
+    // tooltip, and the equally localized name stays available to screen readers
+    // through accessibleName.
+    auto mk = [this](const QString& icon, const QString& name, const QString& tip) {
+        auto* b = new QPushButton(tintedIcon(icon), QString());
         b->setToolTip(tip);
+        b->setAccessibleName(name);
+        b->setAccessibleDescription(tip);
+        b->setIconSize(QSize(kIconPx, kIconPx));
+        b->setFixedSize(kButtonPx, kButtonPx);
         b->setFocusPolicy(Qt::NoFocus);
         b->setCursor(Qt::PointingHandCursor);
         return b;
@@ -203,7 +217,7 @@ void PlaylistDock::buildUi() {
     col->addWidget(sectionLabel(T("Section.MediaSource")));
     sourceCombo_ = new QComboBox();
     sourceCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    sourceCombo_->setMinimumHeight(26);
+    sourceCombo_->setMinimumHeight(kButtonPx);
     auto* refreshBtn = mk(":/icons/refresh.svg", T("Btn.Refresh"), T("Tip.Refresh"));
     auto* srcRow = new QHBoxLayout();
     srcRow->addWidget(sourceCombo_, 1);
@@ -358,7 +372,7 @@ void PlaylistDock::rebuildList() {
         QString qpath = QString::fromStdString(pi.path);
         bool missing = !QFileInfo::exists(qpath);
         QString label = itemText(i);
-        if (missing) label += "  \xE2\x9A\xA0 " + T("FileNotFound"); // ⚠
+        if (missing) label += QStringLiteral("  \u26A0 ") + T("FileNotFound");
         auto* item = new QListWidgetItem(label);
         item->setData(Qt::UserRole, i); // model index, used to sync drag-reorder
         item->setToolTip(missing ? qpath + "  (" + T("FileNotFound") + ")" : qpath);
@@ -457,7 +471,8 @@ void PlaylistDock::onMediaEnded() {
         // clip until the source leaves program (program -> preview), so the next
         // clip's first frame never goes live.
         pendingStageNext_ = true;
-        setStatus("Clip ended — next will load when this source leaves program.");
+        setStatus(QString::fromUtf8(
+            "Clip ended — next will load when this source leaves program."));
         break;
     case Shuffle: {
         int i = pld::randomIndex(playlist_.size(), playlist_.currentIndex(), rng_);
@@ -880,16 +895,20 @@ void PlaylistDock::onOpenSettings() {
 
     auto* langCombo = new QComboBox();
     langCombo->addItem(T("Lang.Auto"), "auto");
-    langCombo->addItem("English", "en-US");
-    langCombo->addItem("Italiano", "it-IT");
-    langCombo->addItem("Español", "es-ES");
-    langCombo->addItem("Français", "fr-FR");
-    langCombo->addItem("Deutsch", "de-DE");
-    langCombo->addItem("Português (BR)", "pt-BR");
-    langCombo->addItem("Русский", "ru-RU");
-    langCombo->addItem("简体中文", "zh-CN");
-    langCombo->addItem("日本語", "ja-JP");
-    langCombo->addItem("한국어", "ko-KR");
+    // Endonyms, not translations: they have to name the language to someone who
+    // cannot read the current UI. fromUtf8() states the source encoding rather
+    // than trusting the compiler's default narrow-literal charset (see the
+    // /utf-8 flag in CMakeLists.txt).
+    langCombo->addItem(QStringLiteral("English"), "en-US");
+    langCombo->addItem(QStringLiteral("Italiano"), "it-IT");
+    langCombo->addItem(QString::fromUtf8("Español"), "es-ES");
+    langCombo->addItem(QString::fromUtf8("Français"), "fr-FR");
+    langCombo->addItem(QStringLiteral("Deutsch"), "de-DE");
+    langCombo->addItem(QString::fromUtf8("Português (BR)"), "pt-BR");
+    langCombo->addItem(QString::fromUtf8("Русский"), "ru-RU");
+    langCombo->addItem(QString::fromUtf8("简体中文"), "zh-CN");
+    langCombo->addItem(QString::fromUtf8("日本語"), "ja-JP");
+    langCombo->addItem(QString::fromUtf8("한국어"), "ko-KR");
     int li = langCombo->findData(language_);
     langCombo->setCurrentIndex(li >= 0 ? li : 0);
     form->addRow(new QLabel(T("Settings.Language")), langCombo);
@@ -987,10 +1006,16 @@ void PlaylistDock::applyUpdateCheckResult(const QString& body, const QString& er
         return;
     }
     if (pld::isNewerVersion(tag.toStdString(), PLD_VERSION)) {
-        versionLabel_->setText(QStringLiteral("v%1 — <a href=\"%2\">update to %3 \xE2\x86\x97</a>")
+        // Non-ASCII inside a QStringLiteral must be written as a universal
+        // character name. QStringLiteral expands to a UTF-16 u"" literal, where
+        // "\xE2\x86\x97" is three code units (U+00E2 U+0086 U+0097 - an accented
+        // "a" plus two invisible controls), not the three UTF-8 bytes of one
+        // arrow. "\u2197" is transcoded by the compiler and is correct on every
+        // platform and toolchain.
+        versionLabel_->setText(QStringLiteral("v%1 \u2014 <a href=\"%2\">%3 \u2197</a>")
                                    .arg(PLD_VERSION)
                                    .arg(QString::fromUtf8(kReleasesUrl))
-                                   .arg(tag));
+                                   .arg(T("Link.UpdateTo").arg(tag.toHtmlEscaped())));
         setStatus(T("Status.UpdateAvailable").arg(tag));
     } else if (manual) {
         setStatus(T("Status.UpToDate").arg(PLD_VERSION));

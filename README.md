@@ -41,7 +41,8 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
 - 🎛️ Native Qt dock inside OBS; bind to any **Media Source** (`ffmpeg_source`)
   or **VLC Source** via a dropdown.
 - 📃 Playlist with add / remove / reorder / clear and transport controls; each
-  item shows its **duration**.
+  item shows its **duration**. The toolbars are **icon-only** so the dock stays
+  narrow enough to sit beside the preview — hover a button for its description.
 - 🖱️ **Drag & drop** files from the OS file manager; reorder by drag; missing
   files highlighted; a **filter** box for long playlists.
 - 🔀 Playback modes: **Play next**, **Loop**, **Load next (paused)**, **Stop**,
@@ -97,7 +98,8 @@ big it was the next time you start.
 1. Add a **Media Source** (or VLC Source) to a scene in OBS.
 2. In the Playlist Deck dock, select it from the **Media source** dropdown.
 3. **Add** media files (or drag them in), then double-click an item — or select
-   it and press **Play** — to play it through that source.
+   it and press **Play** — to play it through that source. Every button shows
+   its icon only; hover it to read what it does, in your language.
 4. Choose an **End-of-clip** behavior, and use **Save** / **Open** to keep
    playlists as files.
 
@@ -137,7 +139,9 @@ folder into your Stream Deck plugins directory — see
 Bundled languages: **English, Italian, Spanish, French, German, Portuguese (BR),
 Russian, Chinese (Simplified), Japanese, Korean**. Pick one in Settings or let it
 follow OBS's UI language; any other OBS language falls back to English. Strings
-live in [`data/locale/`](data/locale/) (`en-US.ini` is the canonical key set).
+live in [`data/locale/`](data/locale/) (`en-US.ini` is the canonical key set),
+UTF-8 encoded without a BOM — including the button tooltips, which carry the
+name of every icon-only control.
 
 ## Compatibility
 
