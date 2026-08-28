@@ -9,10 +9,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- Release packages ship a `SHA256SUMS.txt` and a signed GitHub build provenance
-  attestation, so a download can be tied to the workflow run, commit and runner
-  that produced it. When a `VT_API_KEY` secret is configured, each release is
-  also scanned by VirusTotal and the reports are linked from the release page.
+- Release packages carry a signed GitHub build provenance attestation, so a
+  download can be tied to the workflow run, commit and runner that produced it —
+  the guarantee an unsigned build otherwise lacks. When a `VT_API_KEY` secret is
+  configured, each release is also scanned by VirusTotal and the reports are
+  linked from the release page. No `SHA256SUMS` file is published: GitHub already
+  exposes a sha256 digest per asset, from the same source, and the attestation
+  covers each asset directly rather than through a checksum file.
 
 ### Changed
 

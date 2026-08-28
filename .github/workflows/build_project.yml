@@ -477,16 +477,10 @@ jobs:
           fi
           cat release-notes.md
       # None of the packages are code-signed, so ship something people can check
-      # instead: a digest per file, and an attestation binding each digest to
-      # this workflow, this commit and this runner.
-      - name: Checksums
-        working-directory: release-assets
-        run: |
-          # The Elgato CLI is best effort, so .streamDeckPlugin may not exist.
-          shopt -s nullglob
-          files=(obs-playlist-deck-* *.streamDeckPlugin)
-          [ ${#files[@]} -gt 0 ] || { echo "::error::no packages to hash"; exit 1; }
-          sha256sum "${files[@]}" | tee SHA256SUMS.txt
+      # instead: an attestation binding every asset to this workflow, this commit
+      # and this runner. A SHA256SUMS file would add nothing - GitHub already
+      # publishes a sha256 digest per release asset, from the same source, and
+      # the attestation covers each asset directly rather than by proxy.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v3
         with:
@@ -502,7 +496,6 @@ jobs:
             release-assets/obs-playlist-deck-macos-universal.tar.gz
             release-assets/obs-playlist-deck-streamdeck.zip
             release-assets/*.streamDeckPlugin
-            release-assets/SHA256SUMS.txt
       # An independent second opinion, linked from the release page. Needs a free
       # VirusTotal API key in the VT_API_KEY secret; without one this is skipped
       # and the release still publishes.
@@ -537,7 +530,7 @@ jobs:
             echo ''
             echo '### Verification'
             echo ''
-            echo '- **Checksums**: `SHA256SUMS.txt`, published alongside these assets.'
+            echo '- **Integrity**: compare against the sha256 digest GitHub publishes for each asset.'
             echo "- **Provenance**: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
             echo "${line}."
           } >> release-notes.md

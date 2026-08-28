@@ -115,23 +115,33 @@ is unverified. Every release is built in public by
 [GitHub Actions](.github/workflows/build_project.yml) from the tagged source,
 and each one ships evidence you can check yourself:
 
-**1. Checksums.** Every release carries `SHA256SUMS.txt`. Compare what you
-downloaded against it:
+**1. Integrity.** GitHub publishes a SHA-256 digest for every release asset, so
+hash your download and compare:
 
 ```bash
 # macOS / Linux
-shasum -a 256 -c SHA256SUMS.txt --ignore-missing
+shasum -a 256 obs-playlist-deck-macos-universal.tar.gz
 ```
 ```powershell
 # Windows
 (Get-FileHash obs-playlist-deck-windows.zip -Algorithm SHA256).Hash
 ```
+```bash
+# what GitHub says it should be
+gh release view v1.2.6 --repo angeloruggieridj/obs-playlist-deck --json assets \
+  --jq '.assets[] | .name + "  " + .digest'
+```
+
+This catches a truncated or corrupted download. It is not evidence of who built
+the file — the digest and the file come from the same place — which is what the
+next step is for.
 
 **2. Build provenance.** Each package is published with a signed
 [GitHub attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations)
 binding it to the exact workflow run, commit and runner that produced it — proof
-it came out of this repository's CI and not off someone's laptop. Verify it with
-the [GitHub CLI](https://cli.github.com/):
+it came out of this repository's CI and not off someone's laptop. This is the
+guarantee that actually replaces a publisher signature. Verify it with the
+[GitHub CLI](https://cli.github.com/):
 
 ```bash
 gh attestation verify obs-playlist-deck-macos-universal.tar.gz --repo angeloruggieridj/obs-playlist-deck
@@ -139,13 +149,13 @@ gh attestation verify obs-playlist-deck-macos-universal.tar.gz --repo angelorugg
 
 **3. Malware scan.** When a VirusTotal API key is configured for the repository,
 each release is scanned across ~70 antivirus engines and the report links are
-appended to the release page. You can also upload any file to
+added to the release page. You can also upload any file to
 [virustotal.com](https://www.virustotal.com/gui/home/upload) yourself — a handful
 of engines flagging an unsigned DLL is a common false positive, which is exactly
-why the checksums and the provenance attestation matter more than a scan.
+why the provenance attestation matters more than a scan.
 
-> Checksums and provenance attestations are produced from **v1.2.6 onwards**;
-> `SHA256SUMS.txt` was added to the v1.2.5 release after the fact.
+> Provenance attestations are produced from **v1.2.6 onwards**. Earlier releases
+> have GitHub's asset digests but no attestation.
 
 Finally, nothing here is a black box: the plugin is MIT-licensed, the full source
 is in this repository, and you can always
