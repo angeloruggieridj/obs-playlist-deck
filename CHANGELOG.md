@@ -5,6 +5,44 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] — 2026-08-28
+
+### Fixed
+
+- **The update notice showed garbage characters after the version number.** The
+  label was built with
+  `QStringLiteral("v%1 — <a …>update to %3 \xE2\x86\x97</a>")`. `QStringLiteral`
+  expands to a UTF-16 `u""` literal, where a hex escape is a *code unit*, not a
+  byte — so the three UTF-8 bytes of the ↗ arrow became U+00E2 U+0086 U+0097: an
+  accented "a" followed by two invisible control characters. It was broken on
+  every platform; macOS just drew the controls most visibly. Non-ASCII inside a
+  `QStringLiteral` is now written as a universal character name (`↗`), which
+  the compiler transcodes correctly whatever the source and execution charsets
+  are.
+- **Windows builds could ship the language names as `?`.** MSVC reads a UTF-8
+  source file as the system ANSI code page unless told otherwise and re-encodes
+  narrow literals to that page, which cannot represent `Русский`, `简体中文`,
+  `日本語` or `한국어`. The build now passes `/utf-8`, pinning both the source and
+  the execution charset to UTF-8 — what GCC and Clang already do. Every non-ASCII
+  narrow literal also states its encoding through `QString::fromUtf8()` instead
+  of relying on the compiler default.
+
+### Changed
+
+- **The playlist, transport and file buttons are icon-only.** Their captions
+  moved into the tooltip, so a full row of controls fits a dock narrow enough to
+  sit beside the OBS preview. Nothing was un-localized in the process: the
+  tooltip is the translated `Tip.*` description, and the translated `Btn.*` name
+  now feeds `accessibleName` for screen readers.
+- **The update link text is translated.** "update to v1.2.6" was hardcoded
+  English inside the literal that carried the encoding bug; it is a new
+  `Link.UpdateTo` key in all ten locales.
+
+### Security
+
+- The release tag returned by the GitHub API is HTML-escaped before it reaches
+  the rich-text version label.
+
 ## [1.2.4] — 2026-08-26
 
 ### Fixed
@@ -128,6 +166,7 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
+[1.2.5]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.1...v1.2.2
