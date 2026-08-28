@@ -5,6 +5,21 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Release packages ship a `SHA256SUMS.txt` and a signed GitHub build provenance
+  attestation, so a download can be tied to the workflow run, commit and runner
+  that produced it. When a `VT_API_KEY` secret is configured, each release is
+  also scanned by VirusTotal and the reports are linked from the release page.
+
+### Changed
+
+- The README states plainly that the builds are not code-signed, what each
+  platform does about that — macOS quarantines the plugin and OBS then fails to
+  load it silently — and how to verify a download.
+
 ## [1.2.5] — 2026-08-28
 
 ### Fixed

@@ -447,6 +447,15 @@ jobs:
       - macos
       - streamdeck
     runs-on: ubuntu-24.04
+    # contents: write publishes the release; the other two let the job mint a
+    # build provenance attestation, which is signed with an OIDC token.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      # Optional: without it the VirusTotal step is skipped, not failed.
+      VT_API_KEY: ${{ secrets.VT_API_KEY }}
     steps:
       # Checkout first: download-artifact writes into the workspace and checkout
       # would wipe it.
@@ -467,6 +476,21 @@ jobs:
               "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > release-notes.md
           fi
           cat release-notes.md
+      # None of the packages are code-signed, so ship something people can check
+      # instead: a digest per file, and an attestation binding each digest to
+      # this workflow, this commit and this runner.
+      - name: Checksums
+        working-directory: release-assets
+        run: |
+          # The Elgato CLI is best effort, so .streamDeckPlugin may not exist.
+          shopt -s nullglob
+          files=(obs-playlist-deck-* *.streamDeckPlugin)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::no packages to hash"; exit 1; }
+          sha256sum "${files[@]}" | tee SHA256SUMS.txt
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release-assets/*
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
@@ -478,3 +502,18 @@ jobs:
             release-assets/obs-playlist-deck-macos-universal.tar.gz
             release-assets/obs-playlist-deck-streamdeck.zip
             release-assets/*.streamDeckPlugin
+            release-assets/SHA256SUMS.txt
+      # An independent second opinion, linked from the release page. Needs a free
+      # VirusTotal API key in the VT_API_KEY secret; without one this is skipped
+      # and the release still publishes.
+      - name: Scan the packages with VirusTotal
+        if: ${{ env.VT_API_KEY != '' }}
+        uses: crazy-max/ghaction-virustotal@v4
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          update_release_body: true
+          files: |
+            release-assets/obs-playlist-deck-linux-x86_64.tar.gz
+            release-assets/obs-playlist-deck-windows.zip
+            release-assets/obs-playlist-deck-macos-universal.tar.gz
+            release-assets/obs-playlist-deck-streamdeck.zip

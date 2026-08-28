@@ -27,6 +27,7 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
   - [Windows](#windows)
   - [Linux](#linux)
   - [macOS](#macos-universal)
+- [Unsigned builds, and how to verify them](#unsigned-builds-and-how-to-verify-them)
 - [Usage](#usage)
 - [End-of-clip modes](#end-of-clip-modes)
 - [Remote control & Stream Deck](#remote-control--stream-deck)
@@ -61,6 +62,12 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
 Download your platform's build from the
 [**Releases**](https://github.com/angeloruggieridj/obs-playlist-deck/releases) page.
 
+> [!IMPORTANT]
+> The builds are **not code-signed**, so your OS may block or warn about them the
+> first time — on **macOS** you have to clear the download quarantine by hand or
+> OBS will refuse to load the plugin. See
+> [Unsigned builds, and how to verify them](#unsigned-builds-and-how-to-verify-them).
+
 ### Windows
 Extract the zip into OBS's user plugins folder (`%PROGRAMDATA%\obs-studio\plugins`,
 i.e. `C:\ProgramData\obs-studio\plugins`), so you get
@@ -88,6 +95,61 @@ tar -xzf obs-playlist-deck-macos-universal.tar.gz -C "$PLUGIN_DIR"
 xattr -dr com.apple.quarantine "$PLUGIN_DIR/obs-playlist-deck.plugin"
 ```
 Then open OBS → the **Playlist Deck** dock appears under the *Docks* menu.
+
+## Unsigned builds, and how to verify them
+
+Playlist Deck is a free, one-person project, and code-signing certificates are
+neither free nor issued to projects: an Apple Developer membership is a yearly
+fee, and a Windows OV/EV certificate costs more. So the released packages carry
+**no publisher signature on any platform**. That is why your system treats them
+as untrusted, and what you have to do about it:
+
+| Platform | What you'll see | What to do |
+|---|---|---|
+| **macOS** | Gatekeeper quarantines anything downloaded from a browser. OBS then fails to load the plugin, usually silently — it simply never appears in the *Docks* menu. | Clear the quarantine attribute once, as shown in the [install step](#macos-universal): `xattr -dr com.apple.quarantine "$PLUGIN_DIR/obs-playlist-deck.plugin"`. The bundle is ad-hoc signed, so nothing else is needed. |
+| **Windows** | The downloaded `.zip` is marked as coming from the internet; SmartScreen may warn, and some antivirus products flag unsigned DLLs on sight. | Right-click the zip → **Properties** → tick **Unblock**, then extract. If your antivirus quarantines the DLL, verify it first (below) and add an exclusion. |
+| **Linux** | Nothing. There is no signature check to fail. | Just extract it. |
+
+"Unsigned" means nobody paid to vouch for the file — it does not mean the file
+is unverified. Every release is built in public by
+[GitHub Actions](.github/workflows/build_project.yml) from the tagged source,
+and each one ships evidence you can check yourself:
+
+**1. Checksums.** Every release carries `SHA256SUMS.txt`. Compare what you
+downloaded against it:
+
+```bash
+# macOS / Linux
+shasum -a 256 -c SHA256SUMS.txt --ignore-missing
+```
+```powershell
+# Windows
+(Get-FileHash obs-playlist-deck-windows.zip -Algorithm SHA256).Hash
+```
+
+**2. Build provenance.** Each package is published with a signed
+[GitHub attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations)
+binding it to the exact workflow run, commit and runner that produced it — proof
+it came out of this repository's CI and not off someone's laptop. Verify it with
+the [GitHub CLI](https://cli.github.com/):
+
+```bash
+gh attestation verify obs-playlist-deck-macos-universal.tar.gz --repo angeloruggieridj/obs-playlist-deck
+```
+
+**3. Malware scan.** When a VirusTotal API key is configured for the repository,
+each release is scanned across ~70 antivirus engines and the report links are
+appended to the release page. You can also upload any file to
+[virustotal.com](https://www.virustotal.com/gui/home/upload) yourself — a handful
+of engines flagging an unsigned DLL is a common false positive, which is exactly
+why the checksums and the provenance attestation matter more than a scan.
+
+> Checksums and provenance attestations are produced from **v1.2.6 onwards**;
+> `SHA256SUMS.txt` was added to the v1.2.5 release after the fact.
+
+Finally, nothing here is a black box: the plugin is MIT-licensed, the full source
+is in this repository, and you can always
+[build it yourself](#building-from-source).
 
 ## Usage
 
