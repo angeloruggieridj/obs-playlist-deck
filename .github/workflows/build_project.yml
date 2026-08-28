@@ -518,21 +518,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ANALYSIS: ${{ steps.vt.outputs.analysis }}
         run: |
-          # analysis is "path=url" pairs joined by commas; the URLs carry none.
-          line='- **VirusTotal**: '
-          sep=''
-          IFS=',' read -ra rows <<< "$ANALYSIS"
-          for row in "${rows[@]}"; do
-            line="${line}${sep}[$(basename "${row%%=*}")](${row#*=})"
-            sep=', '
-          done
           {
             echo ''
             echo '### Verification'
             echo ''
             echo '- **Integrity**: compare against the sha256 digest GitHub publishes for each asset.'
             echo "- **Provenance**: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
-            echo "${line}."
+            echo '- **VirusTotal**:'
+            # analysis is "path=url" pairs joined by commas; the URLs carry none.
+            IFS=',' read -ra rows <<< "$ANALYSIS"
+            for row in "${rows[@]}"; do
+              echo "  - [$(basename "${row%%=*}")](${row#*=})"
+            done
           } >> release-notes.md
           cat release-notes.md
           gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md

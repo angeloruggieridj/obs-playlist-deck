@@ -13,6 +13,9 @@
 ![OBS](https://img.shields.io/badge/OBS%20Studio-31%2B-302e31?logo=obsstudio)
 ![Languages](https://img.shields.io/badge/i18n-10%20languages-brightgreen)
 
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-scanned-394eff?logo=virustotal&logoColor=white)](https://github.com/angeloruggieridj/obs-playlist-deck/releases/latest)
+[![Build provenance](https://img.shields.io/badge/provenance-attested-2da44e?logo=github&logoColor=white)](#unsigned-builds-and-how-to-verify-them)
+
 </div>
 
 Playlist Deck adds a dock to OBS that manages a playlist of local media files and
@@ -153,6 +156,11 @@ added to the release page. You can also upload any file to
 [virustotal.com](https://www.virustotal.com/gui/home/upload) yourself — a handful
 of engines flagging an unsigned DLL is a common false positive, which is exactly
 why the provenance attestation matters more than a scan.
+
+> The VirusTotal badge at the top of this page is static: it says the packages
+> **are** scanned, not that any particular scan came back clean. VirusTotal has
+> no live badge endpoint — the per-file reports linked from each release are the
+> actual result, and they are what you should read.
 
 > Provenance attestations are produced from **v1.2.6 onwards**. Earlier releases
 > have GitHub's asset digests but no attestation.
