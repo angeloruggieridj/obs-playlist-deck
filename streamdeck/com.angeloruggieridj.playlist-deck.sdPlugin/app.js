@@ -14,6 +14,7 @@ const ACTION_REQUESTS = {
   [ACTION_PREFIX + "playpause"]: () => ["PlayPause", {}],
   [ACTION_PREFIX + "stop"]: () => ["Stop", {}],
   [ACTION_PREFIX + "mute"]: () => ["ToggleMute", {}],
+  [ACTION_PREFIX + "panic"]: () => ["Panic", {}],
   [ACTION_PREFIX + "playitem"]: (settings) => [
     "PlayIndex",
     { index: parseInt(settings && settings.index, 10) || 0 },
@@ -223,6 +224,8 @@ function titleFor(action, settings) {
   if (action.endsWith(".next")) return short(s.upNextTitle);
   // The mute key is the one place the state is not obvious from the artwork.
   if (action.endsWith(".mute")) return s.muted ? "muted" : "sound on";
+  // The playlist a key acts on is worth knowing when several are in play.
+  if (action.endsWith(".panic")) return s.playlistName || "";
   if (action.endsWith(".playitem")) {
     const index = parseInt(settings && settings.index, 10) || 0;
     return index === s.currentIndex ? "> " + (index + 1) : String(index + 1);

@@ -1,6 +1,6 @@
 {
   "SDKVersion": 2,
-  "Version": "1.3.1",
+  "Version": "1.3.2",
   "Author": "Angelo Ruggieri",
   "Name": "Playlist Deck",
   "Description": "Control the OBS Playlist Deck plugin (next, previous, play/pause, stop, play item) over obs-websocket.",
@@ -80,6 +80,18 @@
       "States": [
         {
           "Image": "icons/mute",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
+      "UUID": "com.angeloruggieridj.playlist-deck.panic",
+      "Name": "Panic",
+      "Tooltip": "Stop playback and cut to the configured scene",
+      "Icon": "icons/panic",
+      "States": [
+        {
+          "Image": "icons/panic",
           "TitleAlignment": "bottom"
         }
       ]
