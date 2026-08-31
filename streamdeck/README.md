@@ -21,6 +21,24 @@ via the Web Crypto API and sends `Identify`. Button presses send a `Request`
 hitting the vendor requests registered by the OBS plugin
 (`Next`, `Previous`, `PlayPause`, `Stop`, `PlayIndex`, `Load`, `GetStatus`).
 
+### Connection handling
+
+- **Reconnects on its own**, with exponential backoff from 1 s to 30 s, so
+  starting OBS after the Stream Deck app just works.
+- **A press made while OBS is away is dropped**, not stored. It used to be
+  queued: every press during an outage then fired at once on the next successful
+  connection — seven `Next` actions in a row, live, minutes later.
+- **A heartbeat** (`GetStatus` every 3 s) both proves the link is alive and
+  keeps the key titles current.
+- **The keys say what is going on**: the Play/Pause key shows the clip that is
+  playing, Next shows what comes after it, Play Item marks the item that is
+  current, and all of them read `offline` when OBS cannot be reached. Pressing a
+  key while offline shows the Stream Deck alert instead of pretending it worked.
+
+To see it for yourself: close OBS, press **Next** three times, then start OBS.
+Nothing should fire on its own; the keys go from `offline` to showing titles
+within a few seconds.
+
 ## Requirements
 
 1. The **Playlist Deck** OBS plugin installed and OBS running.
@@ -36,7 +54,14 @@ the Stream Deck plugins directory, then restart the Stream Deck app:
 - **Windows:** `%APPDATA%\Elgato\StreamDeck\Plugins\`
 
 Drag the actions onto keys. Open any action's Property Inspector and enter the
-OBS **host / port / password** once (stored globally and shared by all actions).
+OBS **host / port / password** once (stored globally and shared by all actions);
+fields save as you type. Press **Test connection** to check them — it tells apart
+"cannot reach OBS", "rejected, check the password" and "OBS answered, Playlist
+Deck plugin not found", which is otherwise a guessing game.
+
+> The password is kept in the Stream Deck app's global settings, in the clear,
+> like every other Stream Deck plugin's credentials. Treat it as local
+> configuration, and do not expose obs-websocket outside a network you control.
 
 ## Icons
 

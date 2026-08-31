@@ -23,12 +23,20 @@ let sd = null; // Stream Deck websocket
 let sdUUID = null;
 let globalSettings = { host: "127.0.0.1", port: 4455, password: "" };
 
+// Contexts of the visible keys, so their titles can follow what the deck is
+// doing and show plainly when OBS is not reachable.
+const visibleKeys = new Map(); // context -> { action, settings }
+
 // ---------------- obs-websocket v5 client ----------------
 const obs = {
   ws: null,
   ready: false,
   nextId: 1,
-  queue: [],
+  pending: new Map(), // requestId -> resolve
+  reconnectDelay: 1000,
+  reconnectTimer: null,
+  heartbeatTimer: null,
+  lastStatus: null,
 
   isConfigChanged(s) {
     return (
@@ -44,17 +52,62 @@ const obs = {
     this._port = s.port;
     this._password = s.password;
     this.ready = false;
+    this.clearTimers();
     try {
-      if (this.ws) this.ws.close();
+      if (this.ws) {
+        this.ws.onclose = null; // this close is deliberate; do not schedule a retry for it
+        this.ws.close();
+      }
     } catch (e) {}
-    this.ws = new WebSocket(`ws://${s.host}:${s.port}`);
-    this.ws.onmessage = (ev) => this.onMessage(JSON.parse(ev.data));
-    this.ws.onclose = () => {
-      this.ready = false;
+    try {
+      this.ws = new WebSocket(`ws://${s.host}:${s.port}`);
+    } catch (e) {
+      this.scheduleReconnect();
+      return;
+    }
+    this.ws.onmessage = (ev) => {
+      let msg;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch (e) {
+        return; // a frame that is not JSON is not ours to act on
+      }
+      this.onMessage(msg);
     };
-    this.ws.onerror = () => {
-      this.ready = false;
-    };
+    this.ws.onclose = () => this.onDisconnected();
+    this.ws.onerror = () => this.onDisconnected();
+  },
+
+  onDisconnected() {
+    const wasReady = this.ready;
+    this.ready = false;
+    this.lastStatus = null;
+    // Anything pressed while OBS was away is dropped, not stored. Queued
+    // presses used to be replayed all at once on the next successful connect —
+    // seven Next actions firing in a row, live, minutes after the fact.
+    this.pending.clear();
+    this.clearTimers();
+    if (wasReady) refreshAllKeys();
+    this.scheduleReconnect();
+  },
+
+  clearTimers() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  },
+
+  scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    const delay = this.reconnectDelay;
+    // Exponential backoff up to half a minute: OBS may simply not be running
+    // yet, and hammering the port for hours helps nobody.
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect(globalSettings);
+    }, delay);
   },
 
   async onMessage(msg) {
@@ -73,24 +126,64 @@ const obs = {
     } else if (msg.op === 2) {
       // Identified
       this.ready = true;
-      const q = this.queue;
-      this.queue = [];
-      q.forEach((fn) => fn());
+      this.reconnectDelay = 1000; // a successful connection resets the backoff
+      this.startHeartbeat();
+      this.poll();
+    } else if (msg.op === 7) {
+      // RequestResponse: the vendor reply rides inside responseData.
+      const d = msg.d || {};
+      const resolve = this.pending.get(d.requestId);
+      if (resolve) {
+        this.pending.delete(d.requestId);
+        resolve((d.responseData && d.responseData.responseData) || null);
+      }
     }
-    // op 7 (RequestResponse) is ignored; we don't need the payload here.
+  },
+
+  startHeartbeat() {
+    this.clearTimers();
+    // A websocket that has silently gone away looks identical to an idle one
+    // until something is sent. Asking for status every few seconds both proves
+    // the link is alive and keeps the key titles current.
+    this.heartbeatTimer = setInterval(() => this.poll(), 3000);
+  },
+
+  poll() {
+    if (!this.ready) return;
+    this.callVendor("GetStatus", {}).then((status) => {
+      if (!status) return;
+      this.lastStatus = status;
+      refreshAllKeys();
+    });
   },
 
   send(obj) {
-    this.ws.send(JSON.stringify(obj));
+    try {
+      this.ws.send(JSON.stringify(obj));
+    } catch (e) {
+      this.onDisconnected();
+    }
   },
 
+  // Returns a promise for the vendor response, or null when OBS is not
+  // connected: a press that cannot be delivered now is not delivered later.
   callVendor(requestType, requestData) {
-    const doSend = () => {
+    if (!this.ready) return Promise.resolve(null);
+    const requestId = "pd-" + this.nextId++;
+    return new Promise((resolve) => {
+      this.pending.set(requestId, resolve);
+      // Never leave a promise hanging on a reply that will not come.
+      setTimeout(() => {
+        if (this.pending.has(requestId)) {
+          this.pending.delete(requestId);
+          resolve(null);
+        }
+      }, 5000);
       this.send({
         op: 6,
         d: {
           requestType: "CallVendorRequest",
-          requestId: "pd-" + this.nextId++,
+          requestId,
           requestData: {
             vendorName: VENDOR,
             requestType,
@@ -98,14 +191,46 @@ const obs = {
           },
         },
       });
-    };
-    if (this.ready) doSend();
-    else this.queue.push(doSend);
+    });
   },
 };
 
 function ensureObs() {
   if (obs.isConfigChanged(globalSettings)) obs.connect(globalSettings);
+}
+
+// ---------------- key feedback ----------------
+// Without this the keys say nothing at all: an operator could not tell a broken
+// connection from a deck that simply had nothing to play.
+function setTitle(context, title) {
+  if (!sd) return;
+  sd.send(
+    JSON.stringify({
+      event: "setTitle",
+      context,
+      payload: { title: title || "", target: 0 },
+    })
+  );
+}
+
+function titleFor(action, settings) {
+  if (!obs.ready) return "offline";
+  const s = obs.lastStatus;
+  if (!s || s.ok === false) return "";
+  const short = (text) => (text || "").slice(0, 18);
+  if (action.endsWith(".playpause")) return short(s.currentTitle);
+  if (action.endsWith(".next")) return short(s.upNextTitle);
+  if (action.endsWith(".playitem")) {
+    const index = parseInt(settings && settings.index, 10) || 0;
+    return index === s.currentIndex ? "> " + (index + 1) : String(index + 1);
+  }
+  return "";
+}
+
+function refreshAllKeys() {
+  visibleKeys.forEach((info, context) => {
+    setTitle(context, titleFor(info.action, info.settings));
+  });
 }
 
 // ---------------- crypto (obs-websocket v5 auth) ----------------
@@ -130,24 +255,52 @@ function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo) 
     sd.send(JSON.stringify({ event: "getGlobalSettings", context: inUUID }));
   };
 
+  sd.onerror = () => {
+    // Nothing to recover here — the Stream Deck app owns this socket — but an
+    // unhandled error event should not take the plugin down with it.
+  };
+
   sd.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch (e) {
+      return;
+    }
+    const settings = (msg.payload && msg.payload.settings) || {};
+
     if (msg.event === "didReceiveGlobalSettings") {
-      const s = (msg.payload && msg.payload.settings) || {};
       globalSettings = {
-        host: s.host || "127.0.0.1",
-        port: parseInt(s.port, 10) || 4455,
-        password: s.password || "",
+        host: settings.host || "127.0.0.1",
+        port: parseInt(settings.port, 10) || 4455,
+        password: settings.password || "",
       };
+      obs.reconnectDelay = 1000; // new settings deserve an immediate attempt
       ensureObs();
+    } else if (msg.event === "willAppear") {
+      visibleKeys.set(msg.context, { action: msg.action, settings });
+      setTitle(msg.context, titleFor(msg.action, settings));
+      ensureObs();
+    } else if (msg.event === "willDisappear") {
+      visibleKeys.delete(msg.context);
+    } else if (msg.event === "didReceiveSettings") {
+      const known = visibleKeys.get(msg.context);
+      if (known) {
+        known.settings = settings;
+        setTitle(msg.context, titleFor(msg.action, settings));
+      }
     } else if (msg.event === "keyUp") {
       const builder = ACTION_REQUESTS[msg.action];
       if (!builder) return;
       ensureObs();
-      const [reqType, reqData] = builder(
-        (msg.payload && msg.payload.settings) || {}
-      );
-      obs.callVendor(reqType, reqData);
+      if (!obs.ready) {
+        // Say so on the key instead of pretending the press worked.
+        sd.send(JSON.stringify({ event: "showAlert", context: msg.context }));
+        setTitle(msg.context, "offline");
+        return;
+      }
+      const [reqType, reqData] = builder(settings);
+      obs.callVendor(reqType, reqData).then(() => obs.poll());
     }
   };
 }

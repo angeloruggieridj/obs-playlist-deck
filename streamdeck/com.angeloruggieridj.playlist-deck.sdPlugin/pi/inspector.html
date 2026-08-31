@@ -4,33 +4,122 @@
     <meta charset="utf-8" />
     <title>Playlist Deck Settings</title>
     <style>
-      body { font: 9pt "Segoe UI", sans-serif; color: #ddd; background: #2d2d2d; margin: 0; padding: 8px; }
-      .row { display: flex; align-items: center; margin: 6px 0; }
-      .row label { width: 90px; opacity: 0.85; }
-      .row input { flex: 1; background: #3d3d3d; border: 1px solid #555; color: #fff; padding: 4px; border-radius: 3px; }
-      h4 { margin: 8px 0 2px; opacity: 0.7; }
-      .hint { opacity: 0.55; font-size: 8pt; margin-top: 6px; }
+      /* Elgato's inspectors put the label above the field and group settings
+         under quiet section headings; this follows that shape so the panel does
+         not look foreign next to the ones that ship with the app. */
+      :root {
+        --bg: #2d2d2d;
+        --surface: #383838;
+        --border: #555;
+        --ink: #e6e6e6;
+        --muted: rgba(230, 230, 230, 0.55);
+        --accent: #4f8cff;
+        --ok: #6fcf8d;
+        --bad: #e57373;
+      }
+      body {
+        font: 9pt "Segoe UI", -apple-system, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+        margin: 0;
+        padding: 10px 12px 14px;
+      }
+      section { margin-bottom: 14px; }
+      h4 {
+        margin: 0 0 6px;
+        font-size: 8.5pt;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .field { margin-bottom: 8px; }
+      .field label { display: block; margin-bottom: 3px; color: var(--muted); }
+      .field input {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--ink);
+        padding: 5px 6px;
+        border-radius: 4px;
+      }
+      .field input:focus { outline: none; border-color: var(--accent); }
+      .row { display: flex; gap: 8px; align-items: center; }
+      button {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--ink);
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      #status { font-size: 8.5pt; }
+      #status.ok { color: var(--ok); }
+      #status.bad { color: var(--bad); }
+      .hint { color: var(--muted); font-size: 8pt; line-height: 1.45; }
     </style>
   </head>
   <body>
-    <div id="itemBox" style="display:none">
+    <section id="itemBox" style="display: none">
       <h4>Item</h4>
-      <div class="row"><label>Index (0-based)</label><input id="index" type="number" min="0" value="0" /></div>
+      <div class="field">
+        <label for="index">Index (0-based)</label>
+        <input id="index" type="number" min="0" value="0" autocomplete="off" />
+      </div>
+      <div class="hint">Position in the playlist. The deck shows the same numbering starting at 1.</div>
+    </section>
+
+    <section>
+      <h4>OBS connection</h4>
+      <div class="field">
+        <label for="host">Host</label>
+        <input id="host" value="127.0.0.1" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label for="port">Port</label>
+        <input id="port" type="number" value="4455" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="new-password" />
+      </div>
+      <div class="row">
+        <button id="test" type="button">Test connection</button>
+        <span id="status"></span>
+      </div>
+    </section>
+
+    <div class="hint">
+      Enable OBS → Tools → WebSocket Server Settings, then enter the same host, port and
+      password here. Requires the Playlist Deck plugin to be installed in OBS.
     </div>
 
-    <h4>OBS connection</h4>
-    <div class="row"><label>Host</label><input id="host" value="127.0.0.1" /></div>
-    <div class="row"><label>Port</label><input id="port" type="number" value="4455" /></div>
-    <div class="row"><label>Password</label><input id="password" type="password" /></div>
-    <div class="hint">Enable OBS → Tools → WebSocket Server Settings, then enter the same host/port/password. Requires the Playlist Deck OBS plugin.</div>
-
     <script>
-      let sd = null, uuid = null, action = "";
+      let sd = null,
+        uuid = null,
+        action = "";
       const $ = (id) => document.getElementById(id);
+
+      // Settings used to be written on "change" only, so a password typed and
+      // then confirmed with Enter — or with the panel closed straight after —
+      // was never saved. Saving on input, debounced, is what the field appears
+      // to promise.
+      function debounce(fn, ms) {
+        let timer = null;
+        return () => {
+          clearTimeout(timer);
+          timer = setTimeout(fn, ms);
+        };
+      }
 
       function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
         uuid = inUUID;
-        const info = inActionInfo ? JSON.parse(inActionInfo) : {};
+        let info = {};
+        try {
+          info = inActionInfo ? JSON.parse(inActionInfo) : {};
+        } catch (e) {}
         action = info.action || "";
         const itemSettings = (info.payload && info.payload.settings) || {};
         if (action.endsWith(".playitem")) {
@@ -44,7 +133,12 @@
           sd.send(JSON.stringify({ event: "getGlobalSettings", context: inUUID }));
         };
         sd.onmessage = (ev) => {
-          const msg = JSON.parse(ev.data);
+          let msg;
+          try {
+            msg = JSON.parse(ev.data);
+          } catch (e) {
+            return;
+          }
           if (msg.event === "didReceiveGlobalSettings") {
             const s = (msg.payload && msg.payload.settings) || {};
             if (s.host) $("host").value = s.host;
@@ -70,9 +164,104 @@
         sd.send(JSON.stringify({ event: "setSettings", context: uuid, payload: settings }));
       }
 
+      // Most "it does not work" reports are a wrong port or password. Checking
+      // it here, where they were typed, is one click instead of a support round
+      // trip.
+      function testConnection() {
+        const status = $("status");
+        status.className = "";
+        status.textContent = "Connecting…";
+        const host = $("host").value.trim() || "127.0.0.1";
+        const port = parseInt($("port").value, 10) || 4455;
+        const password = $("password").value;
+        let ws;
+        try {
+          ws = new WebSocket(`ws://${host}:${port}`);
+        } catch (e) {
+          status.className = "bad";
+          status.textContent = "Cannot reach " + host + ":" + port;
+          return;
+        }
+        const done = (ok, text) => {
+          status.className = ok ? "ok" : "bad";
+          status.textContent = text;
+          try {
+            ws.close();
+          } catch (e) {}
+        };
+        const timeout = setTimeout(() => done(false, "No answer from OBS"), 5000);
+        ws.onerror = () => {
+          clearTimeout(timeout);
+          done(false, "Cannot reach " + host + ":" + port);
+        };
+        ws.onmessage = async (ev) => {
+          let msg;
+          try {
+            msg = JSON.parse(ev.data);
+          } catch (e) {
+            return;
+          }
+          if (msg.op === 0) {
+            const identify = { rpcVersion: 1 };
+            const auth = msg.d && msg.d.authentication;
+            if (auth) {
+              const secret = await sha256b64((password || "") + auth.salt);
+              identify.authentication = await sha256b64(secret + auth.challenge);
+            }
+            ws.send(JSON.stringify({ op: 1, d: identify }));
+          } else if (msg.op === 2) {
+            // Connected and authenticated: now ask the plugin itself, so a
+            // missing OBS plugin is distinguished from a bad password.
+            ws.send(
+              JSON.stringify({
+                op: 6,
+                d: {
+                  requestType: "CallVendorRequest",
+                  requestId: "pi-test",
+                  requestData: {
+                    vendorName: "obs-playlist-deck",
+                    requestType: "GetStatus",
+                    requestData: {},
+                  },
+                },
+              })
+            );
+          } else if (msg.op === 7) {
+            clearTimeout(timeout);
+            const d = msg.d || {};
+            const okRequest = d.requestStatus && d.requestStatus.result;
+            const data = (d.responseData && d.responseData.responseData) || null;
+            if (okRequest && data && data.ok) {
+              done(true, "Connected · " + (data.count || 0) + " items");
+            } else {
+              done(false, "OBS answered, Playlist Deck plugin not found");
+            }
+          }
+        };
+        ws.onclose = () => {
+          if (status.textContent === "Connecting…") {
+            clearTimeout(timeout);
+            done(false, "Rejected — check the password");
+          }
+        };
+      }
+
+      async function sha256b64(str) {
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+        let bin = "";
+        new Uint8Array(buf).forEach((b) => (bin += String.fromCharCode(b)));
+        return btoa(bin);
+      }
+
       document.addEventListener("DOMContentLoaded", () => {
-        ["host", "port", "password"].forEach((id) => $(id).addEventListener("change", saveGlobal));
+        const saveGlobalSoon = debounce(saveGlobal, 300);
+        ["host", "port", "password"].forEach((id) => {
+          $(id).addEventListener("change", saveGlobal);
+          $(id).addEventListener("input", saveGlobalSoon);
+        });
         $("index").addEventListener("change", saveItem);
+        $("index").addEventListener("input", debounce(saveItem, 300));
+        $("test").addEventListener("click", testConnection);
       });
     </script>
   </body>
