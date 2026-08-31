@@ -46,6 +46,21 @@ class Ordering(unittest.TestCase):
         self.assertGreater(key(obs_compat.parse_version("32.2.0-rc2")),
                            key(obs_compat.parse_version("32.2.0-beta3")))
 
+    def test_double_digit_prerelease_numbers_sort_numerically(self):
+        key = obs_compat.sort_key
+        self.assertGreater(key(obs_compat.parse_version("32.2.0-beta10")),
+                           key(obs_compat.parse_version("32.2.0-beta9")))
+
+    def test_rc10_sorts_above_rc2(self):
+        key = obs_compat.sort_key
+        self.assertGreater(key(obs_compat.parse_version("32.2.0-rc10")),
+                           key(obs_compat.parse_version("32.2.0-rc2")))
+
+    def test_stable_still_outranks_high_prerelease_numbers(self):
+        key = obs_compat.sort_key
+        self.assertGreater(key(obs_compat.parse_version("32.2.0")),
+                           key(obs_compat.parse_version("32.2.0-rc10")))
+
 
 class Grid(unittest.TestCase):
     def test_one_first_patch_per_minor_from_the_floor_up(self):

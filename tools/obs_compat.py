@@ -39,12 +39,24 @@ def is_stable(version: tuple[int, int, int, str]) -> bool:
 
 
 def sort_key(version: tuple[int, int, int, str]) -> tuple:
-    # A stable release outranks every prerelease of the same X.Y.Z, so the
-    # stability flag sorts above the suffix text. Among prereleases the suffix
-    # compares as text, which is why "rc2" > "beta3" — correct for OBS, and
-    # the reason we never rely on it for anything but picking the newest.
+    # A stable release outranks every prerelease of the same X.Y.Z. Among
+    # prereleases, numeric runs within the suffix are compared as integers
+    # (so beta9 < beta10 < rc1), while alphabetic runs compare as text
+    # (rc > beta). This ensures double-digit prerelease numbers sort correctly.
     major, minor, patch, suffix = version
-    return (major, minor, patch, 1 if suffix == "" else 0, suffix)
+    if suffix == "":
+        # Stable: rank above all prereleases
+        return (major, minor, patch, 1)
+    # Prerelease: split into alternating alpha and numeric runs, converting
+    # numeric runs to ints for numerical comparison. Each run is wrapped in a
+    # 2-tuple to ensure type safety: (0, int_value) for digits, (1, str_value)
+    # for text. This prevents TypeError from comparing int to str directly.
+    parts = re.findall(r"\d+|\D+", suffix)
+    normalized = tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in parts
+    )
+    return (major, minor, patch, 0, normalized)
 
 
 def _parsed(tags: list[str]) -> list[tuple[int, int, int, str]]:
