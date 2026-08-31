@@ -166,7 +166,7 @@ dock is about to perform.
   projects. Build provenance attestation, per-asset digests and VirusTotal
   reports are what ships instead — see [verification.md](verification.md).
 
-## 15. OBS 30.x builds in an ubuntu:22.04 container (2026-08-31)
+## 15. OBS 30.0.0 builds in an ubuntu:22.04 container (2026-08-31)
 
 `ubuntu-24.04` ships FFmpeg 7, which OBS 30-era code does not compile
 against. That is an OBS build problem, not a plugin incompatibility, but the
@@ -213,5 +213,7 @@ libpci-dev libpulse-dev libudev-dev libasound2-dev
 
 Consequence: minors below 31.0 are probed in the container and can lower the
 declared minimum, provided the container build installs with
-`--component obs_libraries` rather than `--component Development` for any
-OBS version older than the 31.x restructuring.
+`--component obs_libraries` rather than `--component Development`. That
+component name is confirmed for 30.0.0 only — any other pre-31.x tag must be
+checked against its own `cmake/Modules/ObsHelpers.cmake` before assuming
+`obs_libraries` still applies.
