@@ -7,6 +7,7 @@ offline against a fixture of the OBS tag list rather than against the live API.
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -151,6 +152,46 @@ class DeriveRange(unittest.TestCase):
         derived = obs_compat.derive_range(results, GRID, "32.2.2")
         self.assertEqual(derived["min_supported"], "30.1")
         self.assertEqual(derived["gaps"], ["30.0"])
+
+
+class Manifest(unittest.TestCase):
+    def test_absent_manifest_reads_as_none_for_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(obs_compat.load_manifest(Path(tmp) / "obs-compat.json"))
+
+    def test_a_saved_manifest_round_trips(self):
+        built = obs_compat.build_manifest(
+            {version: ok() for version in GRID}, GRID, "32.2.2", None, "2026-08-31")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "obs-compat.json"
+            obs_compat.save_manifest(built, path)
+            self.assertEqual(obs_compat.load_manifest(path), built)
+
+    def test_the_manifest_carries_the_range_and_the_floor_reason(self):
+        built = obs_compat.build_manifest(
+            {version: ok() for version in GRID}, GRID, "32.2.2", None, "2026-08-31")
+        self.assertEqual(built["min_supported"], "30.0")
+        self.assertEqual(built["max_tested"], "32.2.2")
+        self.assertIsNone(built["beta_tested"])
+        self.assertEqual(built["generated"], "2026-08-31")
+        self.assertEqual(built["floor"]["version"], "30.0")
+        self.assertIn("obs_frontend_add_dock_by_id", built["floor"]["reason"])
+
+    def test_unverifiable_minors_are_kept_out_of_the_gaps(self):
+        results = {version: ok() for version in GRID}
+        results["30.0.0"] = unbuildable()
+        built = obs_compat.build_manifest(results, GRID, "32.2.2", None, "2026-08-31")
+        self.assertEqual(built["unverifiable"], ["30.0"])
+        self.assertEqual(built["gaps"], [])
+        self.assertEqual(built["results"]["30.0.0"]["phase"], "obs-build")
+
+    def test_a_qualifying_beta_is_recorded_but_not_in_the_range(self):
+        results = {version: ok() for version in GRID}
+        results["32.3.0-beta1"] = ok()
+        built = obs_compat.build_manifest(
+            results, GRID, "32.2.2", "32.3.0-beta1", "2026-08-31")
+        self.assertEqual(built["beta_tested"], "32.3.0-beta1")
+        self.assertEqual(built["max_tested"], "32.2.2")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ plugin's real one.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -156,4 +157,33 @@ def derive_range(results: dict[str, dict], grid: list[str], max_tested: str) -> 
         "min_supported": _minor_label(grid[index]),
         "gaps": gaps,
         "unverifiable": unverifiable,
+    }
+
+
+MANIFEST_PATH = ROOT / "obs-compat.json"
+
+
+def load_manifest(path: Path = MANIFEST_PATH) -> dict | None:
+    """The manifest, or None on the first ever run — see build_matrix's bootstrap."""
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_manifest(data: dict, path: Path = MANIFEST_PATH) -> None:
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def build_manifest(results: dict[str, dict], grid: list[str], max_tested: str,
+                   beta: str | None, generated: str) -> dict:
+    derived = derive_range(results, grid, max_tested)
+    return {
+        "generated": generated,
+        "floor": {"version": f"{FLOOR[0]}.{FLOOR[1]}", "reason": FLOOR_REASON},
+        "min_supported": derived["min_supported"],
+        "max_tested": max_tested,
+        "beta_tested": beta,
+        "gaps": derived["gaps"],
+        "unverifiable": derived["unverifiable"],
+        "results": dict(sorted(results.items())),
     }
