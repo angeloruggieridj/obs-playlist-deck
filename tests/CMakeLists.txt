@@ -7,11 +7,17 @@ add_executable(playlist-deck-tests
   test_format.cpp
   test_version.cpp
   test_shuffle.cpp
+  test_endmode.cpp
+  test_history.cpp
+  test_staging.cpp
+  test_source_kind.cpp
   test_scene_collection_lifecycle.cpp
   test_source_binding.cpp
   test_update_check.cpp
   test_dock_registration.cpp
   test_ui_text.cpp
+  test_locale_parity.cpp
+  test_dock_behavior.cpp
 )
 target_link_libraries(playlist-deck-tests PRIVATE playlist-deck-core)
 target_include_directories(playlist-deck-tests PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
