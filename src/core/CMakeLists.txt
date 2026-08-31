@@ -5,6 +5,9 @@ add_library(playlist-deck-core STATIC
   Format.cpp
   Version.cpp
   Shuffle.cpp
+  EndMode.cpp
+  History.cpp
+  SourceKind.cpp
 )
 target_include_directories(playlist-deck-core
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

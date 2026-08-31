@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: MIT
 #include "Playlist.hpp"
+#include <algorithm>
 
 namespace pld {
 
@@ -16,8 +18,19 @@ bool Playlist::removeAt(int index) {
     items_.erase(items_.begin() + index);
     if (empty()) { current_ = -1; }
     else if (index < current_) { --current_; }
-    else if (index == current_) { if (current_ > size() - 1) current_ = size() - 1; }
+    else if (index == current_) { current_ = -1; } // the playing item is gone
     return true;
+}
+
+int Playlist::removeMany(std::vector<int> indices) {
+    std::sort(indices.begin(), indices.end());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    int removed = 0;
+    // Back to front, so each erase leaves the earlier indices meaning the same
+    // rows they did when the selection was taken.
+    for (auto it = indices.rbegin(); it != indices.rend(); ++it)
+        if (removeAt(*it)) ++removed;
+    return removed;
 }
 
 void Playlist::clear() { items_.clear(); current_ = -1; }
@@ -47,6 +60,13 @@ bool Playlist::setCurrent(int index) {
     return true;
 }
 
+bool Playlist::setTitle(int index, const std::string& title) {
+    if (index < 0 || index >= size() || title.empty()) return false;
+    if (items_[index].title == title) return false;
+    items_[index].title = title;
+    return true;
+}
+
 int Playlist::next(bool wrap) {
     if (empty()) return -1;
     if (current_ == -1) { current_ = 0; return current_; }
@@ -66,6 +86,26 @@ int Playlist::prev(bool wrap) {
 void Playlist::setItems(std::vector<PlaylistItem> items) {
     items_ = std::move(items);
     current_ = -1;
+}
+
+void Playlist::setItemsKeepCurrent(std::vector<PlaylistItem> items) {
+    const int keep = current_;
+    items_ = std::move(items);
+    current_ = (keep >= 0 && keep < size()) ? keep : -1;
+}
+
+long long Playlist::totalDurationMs() const {
+    long long total = 0;
+    for (const auto& it : items_)
+        if (it.durationMs > 0) total += it.durationMs;
+    return total;
+}
+
+int Playlist::unknownDurationCount() const {
+    int n = 0;
+    for (const auto& it : items_)
+        if (it.durationMs < 0) ++n;
+    return n;
 }
 
 } // namespace pld
