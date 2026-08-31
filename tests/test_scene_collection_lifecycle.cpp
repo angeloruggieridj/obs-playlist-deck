@@ -1,3 +1,7 @@
+// Source-inspection test: it reads the plugin sources as text. The bug it pins
+// — a strong source reference outliving the scene collection that owned it —
+// crashes OBS on a collection switch and cannot be reproduced without one.
+// See CONTRIBUTING.md.
 #include "doctest/doctest.h"
 
 #include <fstream>

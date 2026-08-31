@@ -1,3 +1,7 @@
+// Source-inspection test for the parts that talk to the network, plus real unit
+// tests for the version comparison at the bottom. The HTTP path needs a running
+// OBS and a network to exercise, so the decisions it rests on are pinned as
+// text. See CONTRIBUTING.md for when to replace one of these.
 #include "doctest/doctest.h"
 
 #include "Version.hpp"
