@@ -202,6 +202,37 @@ static void ws_remove(obs_data_t* req, obs_data_t* resp, void*) {
     obs_data_set_bool(resp, "ok", ok);
 }
 
+static void ws_panic(obs_data_t*, obs_data_t* resp, void*) {
+    obs_data_set_bool(resp, "ok", invoke_simple("wsPanic"));
+}
+static void ws_switch_playlist(obs_data_t* req, obs_data_t* resp, void*) {
+    bool ok = false;
+    const char* name = obs_data_get_string(req, "name");
+    if (g_dock && name && *name) {
+        ok = QMetaObject::invokeMethod(g_dock, "wsSwitchPlaylist", Qt::QueuedConnection,
+                                       Q_ARG(QString, QString::fromUtf8(name)));
+    }
+    obs_data_set_bool(resp, "ok", ok);
+}
+static void ws_get_playlists(obs_data_t*, obs_data_t* resp, void*) {
+    if (!g_dock) {
+        obs_data_set_bool(resp, "ok", false);
+        return;
+    }
+    const DeckStatus s = g_dock->status();
+    obs_data_array_t* arr = obs_data_array_create();
+    for (const QString& name : s.playlists) {
+        obs_data_t* entry = obs_data_create();
+        obs_data_set_string(entry, "name", name.toUtf8().constData());
+        obs_data_array_push_back(arr, entry);
+        obs_data_release(entry);
+    }
+    obs_data_set_array(resp, "playlists", arr);
+    obs_data_array_release(arr);
+    obs_data_set_int(resp, "activeIndex", s.playlistIndex);
+    obs_data_set_bool(resp, "ok", true);
+}
+
 static void ws_get_status(obs_data_t*, obs_data_t* resp, void*) {
     if (!g_dock) {
         obs_data_set_bool(resp, "ok", false);
@@ -224,6 +255,8 @@ static void ws_get_status(obs_data_t*, obs_data_t* resp, void*) {
     obs_data_set_int(resp, "mode", s.mode);
     obs_data_set_string(resp, "modeName", s.modeName.toUtf8().constData());
     obs_data_set_string(resp, "playlistName", s.playlistName.toUtf8().constData());
+    obs_data_set_int(resp, "playlistIndex", s.playlistIndex);
+    obs_data_set_int(resp, "scheduledStartMs", s.scheduledStartMs);
     obs_data_set_int(resp, "upNextIndex", s.upNextIndex);
     obs_data_set_string(resp, "upNextTitle", s.upNextTitle.toUtf8().constData());
     obs_data_set_string(resp, "pluginVersion", PLD_VERSION);
@@ -280,6 +313,9 @@ static void register_vendor() {
     obs_websocket_vendor_register_request(g_vendor, "Save", ws_save, nullptr);
     obs_websocket_vendor_register_request(g_vendor, "Move", ws_move, nullptr);
     obs_websocket_vendor_register_request(g_vendor, "Remove", ws_remove, nullptr);
+    obs_websocket_vendor_register_request(g_vendor, "Panic", ws_panic, nullptr);
+    obs_websocket_vendor_register_request(g_vendor, "SwitchPlaylist", ws_switch_playlist, nullptr);
+    obs_websocket_vendor_register_request(g_vendor, "GetPlaylists", ws_get_playlists, nullptr);
     blog(LOG_INFO, "[obs-playlist-deck] obs-websocket vendor registered");
 }
 

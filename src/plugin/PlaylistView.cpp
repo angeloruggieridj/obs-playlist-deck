@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "PlaylistListWidget.hpp"
+#include "PlaylistView.hpp"
 #include "DeckStyle.hpp"
 
 #include <QDragEnterEvent>
@@ -13,51 +13,57 @@
 #include <QPen>
 #include <QUrl>
 
-PlaylistListWidget::PlaylistListWidget(QWidget* parent) : QListWidget(parent) {
+PlaylistView::PlaylistView(QWidget* parent) : QListView(parent) {
     setObjectName("pldList");
     // Multi-selection: removing or reordering a block of clips is the common
     // edit before a show, and doing it one row at a time was busywork.
     setSelectionMode(QAbstractItemView::ExtendedSelection);
+    setSelectionBehavior(QAbstractItemView::SelectRows);
     setDragDropMode(QAbstractItemView::InternalMove); // reorder by drag
-    setAcceptDrops(true);
+    setDragDropOverwriteMode(false);
     setDefaultDropAction(Qt::MoveAction);
-    setUniformItemSizes(false);
+    setAcceptDrops(true);
+    setDropIndicatorShown(true);
     setEditTriggers(QAbstractItemView::NoEditTriggers); // renaming is explicit
     setContextMenuPolicy(Qt::CustomContextMenu);
+    setUniformItemSizes(false);
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
 }
 
-void PlaylistListWidget::setPlaceholder(const QString& title, const QString& hint) {
+void PlaylistView::setPlaceholder(const QString& title, const QString& hint) {
     placeholderTitle_ = title;
     placeholderHint_ = hint;
     viewport()->update();
 }
 
-void PlaylistListWidget::dragEnterEvent(QDragEnterEvent* e) {
+void PlaylistView::dragEnterEvent(QDragEnterEvent* e) {
     if (e->mimeData()->hasUrls()) {
         dropActive_ = true;
         viewport()->update();
         e->acceptProposedAction();
     } else {
-        QListWidget::dragEnterEvent(e); // internal move
+        QListView::dragEnterEvent(e); // internal move
     }
 }
 
-void PlaylistListWidget::dragMoveEvent(QDragMoveEvent* e) {
+void PlaylistView::dragMoveEvent(QDragMoveEvent* e) {
     if (e->mimeData()->hasUrls())
         e->acceptProposedAction();
     else
-        QListWidget::dragMoveEvent(e);
+        QListView::dragMoveEvent(e);
 }
 
-void PlaylistListWidget::dragLeaveEvent(QDragLeaveEvent* e) {
+void PlaylistView::dragLeaveEvent(QDragLeaveEvent* e) {
     dropActive_ = false;
     viewport()->update();
-    QListWidget::dragLeaveEvent(e);
+    QListView::dragLeaveEvent(e);
 }
 
-void PlaylistListWidget::dropEvent(QDropEvent* e) {
+void PlaylistView::dropEvent(QDropEvent* e) {
     dropActive_ = false;
     viewport()->update();
+    // Files from the file manager are the view's business; a reorder is the
+    // model's, and the base class routes it there.
     if (e->mimeData()->hasUrls()) {
         QStringList paths;
         for (const QUrl& u : e->mimeData()->urls()) {
@@ -69,27 +75,26 @@ void PlaylistListWidget::dropEvent(QDropEvent* e) {
         }
         return;
     }
-    QListWidget::dropEvent(e); // perform the internal move
-    emit reordered();
+    QListView::dropEvent(e);
 }
 
-void PlaylistListWidget::keyPressEvent(QKeyEvent* e) {
+void PlaylistView::keyPressEvent(QKeyEvent* e) {
     switch (e->key()) {
     case Qt::Key_Return:
     case Qt::Key_Enter:
-        if (currentItem()) {
+        if (currentIndex().isValid()) {
             emit playRequested();
             return;
         }
         break;
     case Qt::Key_Delete:
-        if (currentItem()) {
+        if (currentIndex().isValid()) {
             emit removeRequested();
             return;
         }
         break;
     case Qt::Key_F2:
-        if (currentItem()) {
+        if (currentIndex().isValid()) {
             emit renameRequested();
             return;
         }
@@ -97,12 +102,12 @@ void PlaylistListWidget::keyPressEvent(QKeyEvent* e) {
     default:
         break;
     }
-    QListWidget::keyPressEvent(e);
+    QListView::keyPressEvent(e);
 }
 
-void PlaylistListWidget::paintEvent(QPaintEvent* e) {
-    QListWidget::paintEvent(e);
-    const bool empty = (count() == 0);
+void PlaylistView::paintEvent(QPaintEvent* e) {
+    QListView::paintEvent(e);
+    const bool empty = (model() == nullptr || model()->rowCount() == 0);
     if (!empty && !dropActive_) return;
 
     QPainter p(viewport());
