@@ -80,7 +80,8 @@ static_assert(u"\xE2\x86\x97"[2] == 0x0097, "which is why the arrow came out as 
 // transcodes correctly whatever the source and execution charsets are.
 TEST_CASE("no QStringLiteral carries raw bytes instead of characters") {
     for (const char* file : {"src/plugin/PlaylistDock.cpp", "src/plugin/PlaylistListWidget.cpp",
-                             "src/plugin/plugin-main.cpp"}) {
+                             "src/plugin/plugin-main.cpp", "src/plugin/MediaScanner.cpp",
+                             "src/plugin/UpdateChecker.cpp", "src/plugin/DeckStyle.cpp"}) {
         const std::string source = readSource(file);
         CAPTURE(file);
         REQUIRE_FALSE(source.empty());
@@ -155,7 +156,8 @@ TEST_CASE("toolbar buttons are icon-only with a localized tooltip") {
     // Both halves of every button's text stay translated: the Btn.* key feeds
     // the accessible name, the Tip.* key the tooltip.
     for (const char* key : {"Refresh", "Add", "Remove", "Up", "Down", "Clear", "Play", "Prev",
-                            "Pause", "Stop", "Next", "Save", "Open", "Settings"}) {
+                            "Pause", "Stop", "Next", "Save", "Open", "Settings", "Rename",
+                            "Undo"}) {
         CAPTURE(key);
         CHECK(dock.find(std::string("T(\"Btn.") + key + "\")") != std::string::npos);
         CHECK(dock.find(std::string("T(\"Tip.") + key + "\")") != std::string::npos);

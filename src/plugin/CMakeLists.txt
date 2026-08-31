@@ -14,6 +14,9 @@ add_library(obs-playlist-deck MODULE
   PlaylistListWidget.cpp
   MediaSourceController.cpp
   MediaProbe.cpp
+  MediaScanner.cpp
+  UpdateChecker.cpp
+  DeckStyle.cpp
   ${CMAKE_SOURCE_DIR}/resources/icons.qrc
 )
 
