@@ -5,6 +5,213 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-08-31
+
+The release that makes the deck do what it always said it did — VLC sources
+included — and rebuilds the dock around what an operator needs to read at a
+glance during a show.
+
+### Fixed
+
+- **Binding a VLC source did nothing at all.** The controller drove both source
+  types by writing `is_local_file` and `local_file`, but OBS's VLC source has
+  neither setting: it reads a `playlist` array of `{ "value": "<path>" }`
+  objects. Every write was accepted and ignored, so selecting a playlist item
+  never changed what a bound VLC source played, `currentFile()` always read back
+  empty (which is why the stale-file cleanup at startup had nothing to compare
+  against), and `media_ended` only ever fired when VLC's own internal playlist
+  ran out. The README has promised VLC support since 1.0. The controller now
+  records the source kind at bind time and writes whichever setting that source
+  actually reads — and, for VLC, also turns its `loop` off, because a looping
+  playlist never reaches its end and auto-advance would have stayed dead
+  otherwise.
+- **The next clip was never staged in the most common Studio Mode setup.**
+  "Load next (paused)" hung on the source's `deactivate` signal, which OBS raises
+  only when a source is in no active scene at all — and in Studio Mode a source
+  sitting in the preview scene still counts as active. The ordinary
+  Program → Preview transition therefore raised nothing: the staged clip was
+  never loaded, and then loaded itself unprompted, possibly hours later, when the
+  source finally went inactive. The trigger is now the actual condition — the
+  bound source is no longer in the Program scene — computed from the frontend's
+  scene, preview-scene and studio-mode events, with `deactivate` kept only as the
+  fallback for a source removed from every scene. While a clip is staged the
+  now-playing card says so, so the deck never holds a surprise.
+- **`GetStatus` read the playlist from the websocket thread.** The other vendor
+  requests marshalled to the UI thread; this one called straight into the model
+  while the UI thread could be adding to or erasing from the same `std::vector`.
+  A read landing inside an `erase` is undefined behaviour — the kind of crash
+  that only happens during a busy show and never reproduces afterwards. The dock
+  now publishes an immutable snapshot under a mutex, and the websocket thread
+  reads only that.
+- **Two background threads were detached and unowned.** Duration probing and the
+  update check each ran on a `std::thread(...).detach()`. A detached thread
+  cannot be cancelled, cannot be waited for, and outlives the objects it posts
+  to: at OBS shutdown one could still be calling into a Qt application that was
+  being torn down. Both now live on threads the dock owns and joins during
+  shutdown, and a probe whose playlist has since been replaced is abandoned
+  mid-flight instead of delivering answers about a list that no longer exists.
+- **A crash mid-write destroyed the saved state.** `settings.json`, `session.json`
+  and saved playlists were written by truncating the file and writing over it. An
+  interruption left truncated JSON, which does not parse — so the next start
+  silently lost the whole playlist. Every write is atomic now (write a temporary,
+  rename it into place). The session was also rewritten on *every* rebuild — once
+  per added file, per probed duration, per reorder — and is now debounced to at
+  most one write per 800 ms, flushed on exit.
+- **The dock froze on every click with a playlist on a network share.** Rebuilding
+  the list ran a synchronous `QFileInfo::exists()` on every item, and the rebuild
+  runs after every add, remove, move, reorder, probe result and language change.
+  Combined with per-file probe results, dropping *n* files cost O(n²) stat calls.
+  Existence is now checked once on a worker thread, cached, and delivered in
+  batches with the durations.
+- **A duration could be written onto the wrong item.** It was read 700 ms after
+  playback started, on a fixed timer that had no idea which item it belonged to:
+  pressing Next inside that window wrote the new clip's duration onto the previous
+  item. The read is now triggered by the source reporting that it started, and is
+  discarded unless the item it was scheduled for is still the current one. The
+  same signal replaces the pair of guessed timers that paused a staged clip —
+  they assumed the decoder was ready within 400 ms, and a heavy or remote file
+  went on air instead of staying paused.
+- **Removing the item that was playing made the next auto-advance skip one.**
+  `current` was slid onto whatever item inherited that row, so the model believed
+  a different clip was playing. Removing the current item now clears the current
+  index and stops playback, with a status line that says so.
+- **A single damaged entry threw away the whole playlist file.** A JSON playlist
+  with 200 good items and one malformed one was rejected outright. Bad entries
+  are skipped and counted now ("Opened, 1 damaged item skipped"); only a file
+  that is not a playlist at all is refused.
+- **`.m3u` files from other players showed every item as missing.** Their paths
+  are relative to the playlist file — the portable layout every other player
+  writes — and were read as absolute. Relative paths in both `.m3u` and `.json`
+  are now resolved against the playlist's own folder.
+- **Durations written as decimals by other tools were dropped** rather than
+  rounded.
+- **Shuffle was not a shuffle.** It drew uniformly at random each step, so items
+  repeated long before the list was exhausted, and because a draw equal to the
+  current item was nudged to the next index, the item after the current one had
+  roughly twice everyone else's probability. It is a bag shuffle now: every item
+  plays once, in random order, before any repeats.
+- **The buttons were unreachable by keyboard.** Every one carried an
+  `accessibleName` and `Qt::NoFocus` at the same time — named for a screen
+  reader, unreachable by the keyboard that drives one. Focus policy is back to
+  the default, with a visible focus ring.
+- **Icons did not follow a theme switch.** They were tinted once from the palette
+  in force when the dock was built; OBS 31 can change theme while running, and
+  they stayed dark on dark. The dock now re-tints on a palette change, and the
+  one hardcoded colour in the project (`#e06c75`, which served as both "file
+  missing" and "error" at about 3.9:1 contrast) is gone in favour of semantic
+  tokens derived from the live palette.
+- **The refresh timer ran forever with the dock closed**, polling the bound
+  source and repainting widgets nobody could see. It stops when the dock is
+  hidden.
+- **Four hotkey targets were allocated and never freed**, and are now owned by
+  the dock and released only after the hotkeys themselves are unregistered.
+- **The session restored the playlist but not which file it came from**, so the
+  label claimed nothing was loaded.
+- **`tools/gen_locales.py` was four releases out of date.** Its hardcoded key
+  list stopped at 1.2.1, so running it — to add a language, say — would have
+  silently deleted every string added since: a tool in the repository that
+  introduced a regression when used. Locale files are now generated from
+  `tools/locales.json`, the single source of truth, and CI fails if the shipped
+  files, the key sets or the `%1` placeholders drift apart.
+- **Stream Deck: presses made while OBS was away fired all at once later.** The
+  companion queued them and replayed the queue on the next successful connection
+  — seven `Next` actions in a row, live, minutes after the fact. They are dropped
+  now, and the connection retries on its own with backoff instead of staying dead
+  until the app is restarted.
+- **Stream Deck: the property inspector lost what you typed.** Fields saved on
+  `change` only, so a password confirmed with Enter, or typed just before the
+  panel closed, was never stored.
+
+### Added
+
+- **A now-playing card at the top of the dock**: title, elapsed / total /
+  remaining on tabular figures, a **seekable** progress bar, the transport, and
+  what plays next — the whole live picture in one block, instead of spread across
+  three widgets in three parts of the dock. Play/Pause finally shows which of the
+  two it will do.
+- **Rename an item** (F2, the pencil button, or the context menu) with "reset
+  name from file" to undo it later. The title override is saved in `.json` and
+  exported as the `#EXTINF` title in `.m3u`.
+- **Undo and redo** (Ctrl+Z / Ctrl+Shift+Z) for every playlist edit: add, remove,
+  clear, move, reorder, rename, open. Clear no longer asks for confirmation,
+  because an undo that works is worth more than a prompt that gets clicked
+  through. Playback is deliberately not undoable.
+- **Multi-selection** and bulk remove.
+- **Add a whole folder** (recursive), sorted the way people read numbers —
+  `clip2` before `clip10` — and **export the playlist as CSV**.
+- **Portable playlists**: an option to save with paths relative to the playlist's
+  own folder, so a gig folder with its media can move to another machine.
+- **An empty state with a drop affordance.** Dropping files onto an empty list
+  always worked; nothing on screen said so.
+- **Item count and total running time** under the list, and a match count in the
+  filter box.
+- **Keyboard operation**: Enter plays, Delete removes, F2 renames, Ctrl+F focuses
+  the filter, and Tab reaches everything.
+- **More hotkeys**: recheck missing files, and play item 1-9 — what a MIDI
+  controller or foot pedal maps to.
+- **Recheck missing files** on demand, from the context menu, instead of
+  restarting OBS.
+- **Vendor API v2**, purely additive: `GetStatus` gains `currentTitle`,
+  `currentPath`, `positionMs`, `durationMs`, `playing`, `paused`, `sourceBound`,
+  `sourceName`, `mode`, `modeName`, `playlistName`, `upNextIndex`, `upNextTitle`
+  and `pluginVersion`, and there are new `GetItems`, `SetMode`, `Seek`,
+  `AddPaths` and `Clear` requests. The v1 fields and requests are untouched, so
+  existing scripts keep working.
+- **Vendor events**, so a remote client can follow playback instead of polling:
+  `item-started`, `playback-state` (about once a second) and `playlist-completed`.
+  The header has always exposed the emit call; nothing used it until now.
+- **Stream Deck keys show state**: the current clip on Play/Pause, what comes
+  next on Next, and `offline` when OBS cannot be reached. The property inspector
+  gained a **Test connection** button that tells apart a wrong password from a
+  missing OBS plugin.
+- `SECURITY.md`, `CONTRIBUTING.md`, issue templates, a `.clang-format`, and
+  `docs/verification.md` — the eighty lines about unsigned builds moved out of
+  the README, which is an entry point, into a page of its own.
+
+### Changed
+
+- **The dock was rebuilt around the list.** Three bold section headers are gone,
+  giving their rows back to the playlist; the operations toolbar sits under the
+  list it edits; the end-of-clip mode and the save/open buttons share one footer
+  row; the status line clears itself after a few seconds and distinguishes
+  information from warnings and errors, which the previous single colour could
+  not. A missing file is now amber, with words as well as colour, and reserved
+  red is kept for things that actually failed.
+- **The end-of-clip mode is chosen from a table, not from the combo box's row
+  index.** The old mapping worked only because the menu order matched the enum:
+  reordering the menu would silently have made "Stop" run a shuffle.
+- The end-of-clip state machine, the shuffle bag, the undo history, the staging
+  rule, the source-kind mapping and the path handling moved into `src/core/`,
+  which has no OBS and no Qt, so all of it is unit-tested directly. The update
+  check and the file scanner moved out of the dock into classes of their own.
+- The dock's icons are cached per resource and ink colour rather than rasterized
+  on every use, and the tick no longer copies the whole playlist twice a second
+  to keep the remote snapshot current.
+- Four icons that shipped unused (`pencil`, `trash`, `download`, `upload`) are
+  used now — rename, clear, add folder, export — and two were added (`search`,
+  `music`).
+- The Stream Deck companion's version follows the plugin's (it read 1.1.0 against
+  a 1.2.6 plugin), the macOS bundle version is read from the build instead of
+  being typed in, and CI checks that CMake, the Stream Deck manifest and the
+  CHANGELOG all name the same version.
+
+### Security
+
+- **The update check's curl handle is hardened.** `CURLOPT_NOSIGNAL` is set —
+  without it libcurl resolves DNS timeouts with `SIGALRM` and `siglongjmp`, which
+  is undefined behaviour off the main thread and has crashed multithreaded
+  programs for as long as curl has existed. `FOLLOWLOCATION` is now bounded by
+  `MAXREDIRS`, restricted to HTTPS on redirects, and given a connect timeout; the
+  response body is capped, so a redirect to something else entirely cannot grow
+  it without limit.
+- **A playlist opened by the remote `Load` request is size-capped at 10 MB.** Any
+  authenticated obs-websocket client can name a path, and the file's contents are
+  then shown in the dock; reading an arbitrarily large file whole would freeze
+  OBS. The cap applies to the UI's own Open as well. `SECURITY.md` documents the
+  remote surface plainly.
+- **CI runs with least privilege.** `contents: write` was granted at the workflow
+  level and inherited by every build job; only the release job asks for it now.
+
 ## [1.2.6] — 2026-08-28
 
 ### Added
@@ -184,6 +391,7 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
+[1.3.0]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.6...v1.3.0
 [1.2.6]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.3...v1.2.4

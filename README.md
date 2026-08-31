@@ -14,7 +14,7 @@
 ![Languages](https://img.shields.io/badge/i18n-10%20languages-brightgreen)
 
 [![VirusTotal](https://img.shields.io/badge/VirusTotal-scanned-394eff?logo=virustotal&logoColor=white)](https://github.com/angeloruggieridj/obs-playlist-deck/releases/latest)
-[![Build provenance](https://img.shields.io/badge/provenance-attested-2da44e?logo=github&logoColor=white)](#unsigned-builds-and-how-to-verify-them)
+[![Build provenance](https://img.shields.io/badge/provenance-attested-2da44e?logo=github&logoColor=white)](docs/verification.md)
 
 </div>
 
@@ -30,8 +30,9 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
   - [Windows](#windows)
   - [Linux](#linux)
   - [macOS](#macos-universal)
-- [Unsigned builds, and how to verify them](#unsigned-builds-and-how-to-verify-them)
+- [Unsigned builds](#unsigned-builds)
 - [Usage](#usage)
+- [Keyboard](#keyboard)
 - [End-of-clip modes](#end-of-clip-modes)
 - [Remote control & Stream Deck](#remote-control--stream-deck)
 - [Localization](#localization)
@@ -43,20 +44,30 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
 ## Features
 
 - 🎛️ Native Qt dock inside OBS; bind to any **Media Source** (`ffmpeg_source`)
-  or **VLC Source** via a dropdown.
-- 📃 Playlist with add / remove / reorder / clear and transport controls; each
-  item shows its **duration**. The toolbars are **icon-only** so the dock stays
-  narrow enough to sit beside the preview — hover a button for its description.
+  or **VLC Source** via a dropdown — each is driven through the settings it
+  actually reads, so both really work.
+- ▶️ **Now-playing card**: title, elapsed / total / remaining, a **seekable**
+  progress bar, transport, and what plays next — the whole live picture in one
+  block at the top of the dock.
+- 📃 Playlist with add / remove / reorder / **rename** / clear, **multi-select**
+  and **undo** (Ctrl+Z); each item shows its **duration**, and the toolbar shows
+  the **item count and total running time**.
 - 🖱️ **Drag & drop** files from the OS file manager; reorder by drag; missing
-  files highlighted; a **filter** box for long playlists.
+  files flagged; a **filter** box with a match count for long playlists.
+- 📂 Add a **whole folder** (recursive, sorted the way people read numbers:
+  `clip2` before `clip10`), and export the playlist as **CSV**.
 - 🔀 Playback modes: **Play next**, **Loop**, **Load next (paused)**, **Stop**,
-  **Shuffle**, **Repeat one**.
-- ⏱️ Now-playing **progress bar** with elapsed / total / remaining time.
-- 💾 Save / open playlists as **`.json`** or **`.m3u/.m3u8`** to a location you
-  choose; optional **auto-restore** of the last playlist; **background**
-  duration probing.
-- ⌨️ Global OBS **hotkeys**: next, previous, play/pause, stop.
-- 🕹️ **Remote control** via obs-websocket + an included **Stream Deck** companion.
+  **Shuffle** (a real bag shuffle — every clip plays before any repeats),
+  **Repeat one**.
+- 💾 Save / open playlists as **`.json`** or **`.m3u/.m3u8`**, with **relative
+  paths** on request so a gig folder can move between machines; `.m3u` files
+  written by other players are read correctly. Optional **auto-restore** of the
+  last playlist; **background** duration probing.
+- ⌨️ Global OBS **hotkeys** (next, previous, play/pause, stop, recheck files,
+  play item 1-9) and full **keyboard operation** of the dock itself.
+- 🕹️ **Remote control** via obs-websocket — requests *and* live events — plus an
+  included **Stream Deck** companion that reconnects on its own and shows the
+  current clip on the key.
 - 🌍 **Localized** UI (10 languages) — selectable or follow OBS.
 - 🔔 Built-in update check (links to the latest release; manual download).
 
@@ -99,75 +110,20 @@ xattr -dr com.apple.quarantine "$PLUGIN_DIR/obs-playlist-deck.plugin"
 ```
 Then open OBS → the **Playlist Deck** dock appears under the *Docks* menu.
 
-## Unsigned builds, and how to verify them
+## Unsigned builds
 
-Playlist Deck is a free, one-person project, and code-signing certificates are
-neither free nor issued to projects: an Apple Developer membership is a yearly
-fee, and a Windows OV/EV certificate costs more. So the released packages carry
-**no publisher signature on any platform**. That is why your system treats them
-as untrusted, and what you have to do about it:
+The releases carry **no publisher signature on any platform** — code-signing
+certificates are neither free nor issued to one-person projects. Your OS will
+say so: macOS quarantines the plugin (and OBS then fails to load it, silently),
+Windows marks the zip as coming from the internet.
 
-| Platform | What you'll see | What to do |
-|---|---|---|
-| **macOS** | Gatekeeper quarantines anything downloaded from a browser. OBS then fails to load the plugin, usually silently — it simply never appears in the *Docks* menu. | Clear the quarantine attribute once, as shown in the [install step](#macos-universal): `xattr -dr com.apple.quarantine "$PLUGIN_DIR/obs-playlist-deck.plugin"`. The bundle is ad-hoc signed, so nothing else is needed. |
-| **Windows** | The downloaded `.zip` is marked as coming from the internet; SmartScreen may warn, and some antivirus products flag unsigned DLLs on sight. | Right-click the zip → **Properties** → tick **Unblock**, then extract. If your antivirus quarantines the DLL, verify it first (below) and add an exclusion. |
-| **Linux** | Nothing. There is no signature check to fail. | Just extract it. |
+Unsigned does not mean unverifiable. Every release is built in public from the
+tagged source, and ships a signed **build provenance attestation**, GitHub's
+per-asset **SHA-256 digests** and, when a key is configured, **VirusTotal**
+reports.
 
-"Unsigned" means nobody paid to vouch for the file — it does not mean the file
-is unverified. Every release is built in public by
-[GitHub Actions](.github/workflows/build_project.yml) from the tagged source,
-and each one ships evidence you can check yourself:
-
-**1. Integrity.** GitHub publishes a SHA-256 digest for every release asset, so
-hash your download and compare:
-
-```bash
-# macOS / Linux
-shasum -a 256 obs-playlist-deck-macos-universal.tar.gz
-```
-```powershell
-# Windows
-(Get-FileHash obs-playlist-deck-windows.zip -Algorithm SHA256).Hash
-```
-```bash
-# what GitHub says it should be
-gh release view v1.2.6 --repo angeloruggieridj/obs-playlist-deck --json assets \
-  --jq '.assets[] | .name + "  " + .digest'
-```
-
-This catches a truncated or corrupted download. It is not evidence of who built
-the file — the digest and the file come from the same place — which is what the
-next step is for.
-
-**2. Build provenance.** Each package is published with a signed
-[GitHub attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations)
-binding it to the exact workflow run, commit and runner that produced it — proof
-it came out of this repository's CI and not off someone's laptop. This is the
-guarantee that actually replaces a publisher signature. Verify it with the
-[GitHub CLI](https://cli.github.com/):
-
-```bash
-gh attestation verify obs-playlist-deck-macos-universal.tar.gz --repo angeloruggieridj/obs-playlist-deck
-```
-
-**3. Malware scan.** When a VirusTotal API key is configured for the repository,
-each release is scanned across ~70 antivirus engines and the report links are
-added to the release page. You can also upload any file to
-[virustotal.com](https://www.virustotal.com/gui/home/upload) yourself — a handful
-of engines flagging an unsigned DLL is a common false positive, which is exactly
-why the provenance attestation matters more than a scan.
-
-> The VirusTotal badge at the top of this page is static: it says the packages
-> **are** scanned, not that any particular scan came back clean. VirusTotal has
-> no live badge endpoint — the per-file reports linked from each release are the
-> actual result, and they are what you should read.
-
-> Provenance attestations are produced from **v1.2.6 onwards**. Earlier releases
-> have GitHub's asset digests but no attestation.
-
-Finally, nothing here is a black box: the plugin is MIT-licensed, the full source
-is in this repository, and you can always
-[build it yourself](#building-from-source).
+👉 **[How to verify a download](docs/verification.md)** — what to expect per
+platform, and the three checks, with commands.
 
 ## Usage
 
@@ -177,11 +133,22 @@ big it was the next time you start.
 
 1. Add a **Media Source** (or VLC Source) to a scene in OBS.
 2. In the Playlist Deck dock, select it from the **Media source** dropdown.
-3. **Add** media files (or drag them in), then double-click an item — or select
-   it and press **Play** — to play it through that source. Every button shows
-   its icon only; hover it to read what it does, in your language.
+3. **Add** media files (or drag them in, or add a whole folder from the
+   right-click menu), then double-click an item — or select it and press
+   **Play** — to play it through that source. Every button shows its icon only;
+   hover it to read what it does, in your language.
 4. Choose an **End-of-clip** behavior, and use **Save** / **Open** to keep
    playlists as files.
+
+Right-click the list for rename, "reset name from file", add folder, export CSV,
+recheck missing files, and undo/redo. A destructive edit — remove, clear, an
+accidental reorder — is undone with **Ctrl+Z**: there is no confirmation dialog
+to dismiss, because an undo that works is worth more than a prompt that gets
+clicked through.
+
+Missing files are marked in amber with the words *file not found*, not by colour
+alone. The check runs on a worker thread, so a playlist on a network share does
+not freeze the dock; **Recheck missing files** runs it again on demand.
 
 The dropdown lists only the media sources of the **active scene collection**. If
 you switch to a collection that has no source by the configured name, the
@@ -190,38 +157,90 @@ picks a source for you, and never touches a file path you set up in OBS. Your
 choice is remembered, so it comes back when you return to the collection that
 owns that source.
 
+## Keyboard
+
+The dock is fully operable without a mouse — every control is reachable by Tab,
+and the list carries the shortcuts you would expect.
+
+| Key | In the playlist |
+|---|---|
+| **Enter** | Play the selected item |
+| **Delete** | Remove the selection |
+| **F2** | Rename the selected item |
+| **Ctrl+F** | Jump to the filter box |
+| **Ctrl+Z** / **Ctrl+Shift+Z** | Undo / redo the last playlist change |
+
+Global OBS hotkeys (assign them in OBS → Settings → Hotkeys) cover **Next**,
+**Previous**, **Play/Pause**, **Stop**, **Recheck missing files** and **Play item
+1-9** — the last of these is what a MIDI controller or foot pedal maps to.
+
 ## End-of-clip modes
 
 | Mode | Behavior |
 |------|----------|
 | **Play next** | Auto-advance to the next item. |
 | **Loop** | Auto-advance and wrap around. |
-| **Load next (paused)** | Hold the finished clip's last frame on Program; stage the next clip (paused, off-air) only when the source moves Program → Preview in Studio Mode. The next clip never goes live early and the playlist never auto-advances on air. |
+| **Load next (paused)** | Hold the finished clip's last frame on Program; load the next clip, paused, as soon as the bound source is **no longer in the Program scene** — a studio-mode transition, a scene change, or the source being taken off air. Until then the card says a clip is staged. The next clip never goes live early and the playlist never auto-advances on air. |
 | **Stop** | Stop at the end of the clip. |
-| **Shuffle** | Play a random next item. |
+| **Shuffle** | Bag shuffle: every item plays once, in random order, before any repeats. |
 | **Repeat one** | Replay the current item. |
 
 ## Remote control & Stream Deck
 
-Playlist Deck registers an obs-websocket **vendor** named `obs-playlist-deck`
-with requests `Next`, `Previous`, `PlayPause`, `Stop`, `PlayIndex` (`{index}`),
-`Load` (`{path}`), `GetStatus`. Call them via obs-websocket v5
-`CallVendorRequest` from any client or script.
+Playlist Deck registers an obs-websocket **vendor** named `obs-playlist-deck`.
+Call its requests via obs-websocket v5 `CallVendorRequest` from any client or
+script.
+
+| Request | Data | Does |
+|---|---|---|
+| `Next` / `Previous` / `PlayPause` / `Stop` | — | Transport |
+| `PlayIndex` | `{ index }` | Play an item by position (0-based) |
+| `Seek` | `{ positionMs }` | Jump inside the current clip |
+| `SetMode` | `{ mode }` | End-of-clip mode, `0`-`5` in the order of the table above |
+| `Load` | `{ path }` | Open a playlist file (10 MB cap) |
+| `AddPaths` | `{ paths: [{ value }] }` | Append media files |
+| `Clear` | — | Empty the playlist |
+| `GetStatus` | — | See below |
+| `GetItems` | `{ from, to }` | Titles and paths, paginated |
+
+`GetStatus` answers with `ok`, `count`, `currentIndex` — the fields it has always
+had — plus `currentTitle`, `currentPath`, `positionMs`, `durationMs`, `playing`,
+`paused`, `sourceBound`, `sourceName`, `mode`, `modeName`, `playlistName`,
+`upNextIndex`, `upNextTitle` and `pluginVersion`. Nothing was removed, so
+existing scripts keep working.
+
+The deck also **emits events**, so a client can follow playback instead of
+polling: `item-started` (`index`, `title`, `path`, `durationMs`),
+`playback-state` (`playing`, `positionMs`, `durationMs`, `index`, about once a
+second) and `playlist-completed`.
 
 An Elgato **Stream Deck companion** lives in [`streamdeck/`](streamdeck/) with
-Next / Previous / Play-Pause / Stop / Play Item actions (buildless JS). Grab
-`obs-playlist-deck-streamdeck.zip` from a release and copy the `.sdPlugin`
-folder into your Stream Deck plugins directory — see
-[`streamdeck/README.md`](streamdeck/README.md).
+Next / Previous / Play-Pause / Stop / Play Item actions (buildless JS). It
+reconnects on its own with backoff, drops rather than replays presses made while
+OBS was away, and shows the current clip — or `offline` — on the key. The
+property inspector has a **Test connection** button that tells apart a wrong
+password from a missing OBS plugin. Grab `obs-playlist-deck-streamdeck.zip` from
+a release and copy the `.sdPlugin` folder into your Stream Deck plugins
+directory — see [`streamdeck/README.md`](streamdeck/README.md).
 
 ## Localization
 
 Bundled languages: **English, Italian, Spanish, French, German, Portuguese (BR),
 Russian, Chinese (Simplified), Japanese, Korean**. Pick one in Settings or let it
-follow OBS's UI language; any other OBS language falls back to English. Strings
-live in [`data/locale/`](data/locale/) (`en-US.ini` is the canonical key set),
-UTF-8 encoded without a BOM — including the button tooltips, which carry the
-name of every icon-only control.
+follow OBS's UI language; any other OBS language falls back to English.
+
+Every user-visible string is translated — status messages and file-dialog titles
+included. The shipped [`data/locale/`](data/locale/) files are **generated** from
+[`tools/locales.json`](tools/locales.json), which is the one file to edit:
+
+```bash
+python tools/gen_locales.py           # rewrite data/locale/*.ini
+python tools/gen_locales.py --check   # what CI runs
+```
+
+`--check` fails if a language is missing a key, if a translation dropped a `%1`
+placeholder, if a file carries a BOM, or if a `.ini` was edited by hand. To add
+or fix a translation, change `locales.json`, run the generator, and open a PR.
 
 ## Compatibility
 
@@ -249,10 +268,21 @@ ctest --test-dir build-tests --output-on-failure
 ```
 
 CI ([`.github/workflows/build_project.yml`](.github/workflows/build_project.yml))
-builds OBS dev libraries from source (cached per OBS version) and the plugin per
-platform, renders the Stream Deck icons and packages the companion, and runs an
-on-demand `compat` matrix against older OBS SDKs. See
-[`docs/superpowers/`](docs/superpowers/) for the design spec and plan.
+runs the unit tests plus the locale and version checks, builds OBS dev libraries
+from source (cached per OBS version) and the plugin per platform, renders the
+Stream Deck icons and packages the companion, and runs an on-demand `compat`
+matrix against older OBS SDKs. See [`docs/superpowers/`](docs/superpowers/) for
+the design spec and plan, and [CONTRIBUTING.md](CONTRIBUTING.md) for the working
+agreement (one finding, one PR, one CHANGELOG entry).
+
+The `src/core/` library is plain C++17 with no OBS and no Qt, which is what
+makes the playlist model, the playlist formats, the end-of-clip state machine,
+the shuffle bag, the undo history and the path handling unit-testable on their
+own. `src/plugin/` is the OBS and Qt layer on top of it.
+
+## Security
+
+Reporting a vulnerability: see [SECURITY.md](SECURITY.md).
 
 ## Changelog
 
