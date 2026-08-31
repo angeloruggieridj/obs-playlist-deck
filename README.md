@@ -63,8 +63,10 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
   paths** on request so a gig folder can move between machines; `.m3u` files
   written by other players are read correctly. Optional **auto-restore** of the
   last playlist; **background** duration probing.
-- ⌨️ Global OBS **hotkeys** (next, previous, play/pause, stop, recheck files,
-  play item 1-9) and full **keyboard operation** of the dock itself.
+- 🔇 **Mute** the bound source from the card, with an optional "unmute when a
+  clip starts" — off by default, so the mute stays where you put it.
+- ⌨️ Global OBS **hotkeys** (next, previous, play/pause, stop, mute, recheck
+  files, play item 1-9) and full **keyboard operation** of the dock itself.
 - 🕹️ **Remote control** via obs-websocket — requests *and* live events — plus an
   included **Stream Deck** companion that reconnects on its own and shows the
   current clip on the key.
@@ -83,13 +85,16 @@ Download your platform's build from the
 > [Unsigned builds, and how to verify them](#unsigned-builds-and-how-to-verify-them).
 
 ### Windows
-Extract the zip into OBS's user plugins folder (`%PROGRAMDATA%\obs-studio\plugins`,
-i.e. `C:\ProgramData\obs-studio\plugins`), so you get
-`C:\ProgramData\obs-studio\plugins\obs-playlist-deck\bin\64bit\obs-playlist-deck.dll`
-(and `…\obs-playlist-deck\data\`). Survives OBS updates — no need to touch the
-OBS install folder.
+Extract the zip into an OBS plugins folder, so you end up with
+`…\plugins\obs-playlist-deck\bin\64bit\obs-playlist-deck.dll` (and
+`…\obs-playlist-deck\data\`). Either location works and both survive OBS
+updates — no need to touch the OBS install folder.
 
 ```powershell
+# Per user (recommended): no administrator rights needed
+Expand-Archive obs-playlist-deck-windows.zip -DestinationPath "$env:APPDATA\obs-studio\plugins"
+
+# Per machine: every account on the PC, may prompt for elevation
 Expand-Archive obs-playlist-deck-windows.zip -DestinationPath "$env:PROGRAMDATA\obs-studio\plugins"
 ```
 Then restart OBS.
@@ -171,8 +176,9 @@ and the list carries the shortcuts you would expect.
 | **Ctrl+Z** / **Ctrl+Shift+Z** | Undo / redo the last playlist change |
 
 Global OBS hotkeys (assign them in OBS → Settings → Hotkeys) cover **Next**,
-**Previous**, **Play/Pause**, **Stop**, **Recheck missing files** and **Play item
-1-9** — the last of these is what a MIDI controller or foot pedal maps to.
+**Previous**, **Play/Pause**, **Stop**, **Mute/unmute**, **Recheck missing
+files** and **Play item 1-9** — the last of these is what a MIDI controller or
+foot pedal maps to.
 
 ## End-of-clip modes
 
@@ -194,10 +200,15 @@ script.
 | Request | Data | Does |
 |---|---|---|
 | `Next` / `Previous` / `PlayPause` / `Stop` | — | Transport |
+| `ToggleMute` | — | Mute or unmute the bound source |
+| `SetMute` | `{ muted }` | Set the mute explicitly |
 | `PlayIndex` | `{ index }` | Play an item by position (0-based) |
 | `Seek` | `{ positionMs }` | Jump inside the current clip |
 | `SetMode` | `{ mode }` | End-of-clip mode, `0`-`5` in the order of the table above |
 | `Load` | `{ path }` | Open a playlist file (10 MB cap) |
+| `Save` | `{ path }` | Write the playlist (format from the extension) |
+| `Move` | `{ from, to }` | Reorder one item |
+| `Remove` | `{ index }` | Remove one item |
 | `AddPaths` | `{ paths: [{ value }] }` | Append media files |
 | `Clear` | — | Empty the playlist |
 | `GetStatus` | — | See below |
@@ -205,21 +216,22 @@ script.
 
 `GetStatus` answers with `ok`, `count`, `currentIndex` — the fields it has always
 had — plus `currentTitle`, `currentPath`, `positionMs`, `durationMs`, `playing`,
-`paused`, `sourceBound`, `sourceName`, `mode`, `modeName`, `playlistName`,
-`upNextIndex`, `upNextTitle` and `pluginVersion`. Nothing was removed, so
-existing scripts keep working.
+`paused`, `muted`, `sourceBound`, `sourceName`, `mode`, `modeName`,
+`playlistName`, `upNextIndex`, `upNextTitle` and `pluginVersion`. Nothing was
+removed, so existing scripts keep working.
 
 The deck also **emits events**, so a client can follow playback instead of
 polling: `item-started` (`index`, `title`, `path`, `durationMs`),
 `playback-state` (`playing`, `positionMs`, `durationMs`, `index`, about once a
-second) and `playlist-completed`.
+second), `mute-changed` (`muted`) and `playlist-completed`.
 
 An Elgato **Stream Deck companion** lives in [`streamdeck/`](streamdeck/) with
-Next / Previous / Play-Pause / Stop / Play Item actions (buildless JS). It
+Next / Previous / Play-Pause / Stop / Mute / Play Item actions (buildless JS). It
 reconnects on its own with backoff, drops rather than replays presses made while
 OBS was away, and shows the current clip — or `offline` — on the key. The
 property inspector has a **Test connection** button that tells apart a wrong
-password from a missing OBS plugin. Grab `obs-playlist-deck-streamdeck.zip` from
+password from a missing OBS plugin, and picks the clip for *Play Item* **by
+name** from the live playlist instead of asking for an index. Grab `obs-playlist-deck-streamdeck.zip` from
 a release and copy the `.sdPlugin` folder into your Stream Deck plugins
 directory — see [`streamdeck/README.md`](streamdeck/README.md).
 
@@ -272,13 +284,15 @@ runs the unit tests plus the locale and version checks, builds OBS dev libraries
 from source (cached per OBS version) and the plugin per platform, renders the
 Stream Deck icons and packages the companion, and runs an on-demand `compat`
 matrix against older OBS SDKs. See [`docs/superpowers/`](docs/superpowers/) for
-the design spec and plan, and [CONTRIBUTING.md](CONTRIBUTING.md) for the working
-agreement (one finding, one PR, one CHANGELOG entry).
+the design spec and plan, [docs/decisions.md](docs/decisions.md) for why the
+plugin is built the way it is, and [CONTRIBUTING.md](CONTRIBUTING.md) for the
+working agreement (one finding, one PR, one CHANGELOG entry).
 
 The `src/core/` library is plain C++17 with no OBS and no Qt, which is what
-makes the playlist model, the playlist formats, the end-of-clip state machine,
-the shuffle bag, the undo history and the path handling unit-testable on their
-own. `src/plugin/` is the OBS and Qt layer on top of it.
+makes the playlist model, the playlist formats, the playback engine, the shuffle
+bag, the undo history and the path handling unit-testable on their own. The
+engine drives an `IMediaTransport`: a fake in the tests, the OBS source at
+runtime. `src/plugin/` is the OBS and Qt layer on top of it.
 
 ## Security
 

@@ -17,6 +17,11 @@ on:
 permissions:
   contents: read
 
+# Actions are pinned to a commit, with the tag in a trailing comment. A tag is a
+# movable pointer: whoever can push to an action's repository can repoint it at
+# different code, and every workflow that trusts the tag runs that code on the
+# next build. The comment is what keeps the pin readable and updatable.
+
 env:
   OBS_VERSION: "32.1.2"
   OBS_DEPS_VERSION: "2025-08-23"
@@ -26,7 +31,7 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - run: cmake -B build -S . -G Ninja -DBUILD_PLUGIN=OFF -DBUILD_TESTS=ON
       - run: cmake --build build
@@ -46,7 +51,7 @@ jobs:
     needs: tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install OBS dev headers
         run: |
           sudo apt-get update
@@ -62,7 +67,7 @@ jobs:
         run: DESTDIR="${{ github.workspace }}/release" cmake --install build
       - name: Package
         run: tar -czf obs-playlist-deck-linux-x86_64.tar.gz -C "${{ github.workspace }}/release" .
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: obs-playlist-deck-linux
           path: obs-playlist-deck-linux-x86_64.tar.gz
@@ -74,13 +79,17 @@ jobs:
     env:
       QT_WIN_VERSION: "6.7.3"
       QT_WIN_ARCH: "win64_msvc2019_64"
+      # major.minor of the Qt that OBS ${OBS_VERSION} ships. The plugin build
+      # refuses to produce a binary for a different one: a Qt plugin loaded into
+      # OBS runs against OBS's Qt, and a mismatch crashes later, elsewhere.
+      QT_ABI: "6.7"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       # --- Qt (cached) ---
       - name: Cache Qt
         id: cache-qt
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: C:\Qt
           key: qt-${{ env.QT_WIN_VERSION }}-${{ env.QT_WIN_ARCH }}-v1
@@ -100,7 +109,7 @@ jobs:
       # --- OBS prebuilt deps (cached) ---
       - name: Cache obs-deps
         id: cache-deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: C:\obs-deps
           key: obsdeps-win-x64-v1
@@ -128,7 +137,7 @@ jobs:
       # valid across runs (deps/Qt are also at fixed C:\ paths).
       - name: Cache OBS dev
         id: cache-obsdev
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: C:\obs-dev
           key: obsdev-win-${{ env.OBS_VERSION }}-v1
@@ -164,6 +173,7 @@ jobs:
           cmake -B build -S . -A x64 ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DBUILD_TESTS=OFF ^
+            -DPLD_EXPECTED_QT=%QT_ABI% ^
             -DCMAKE_PREFIX_PATH="C:\obs-dev;%Qt6_DIR%;C:\obs-deps"
       - name: Build plugin
         run: cmake --build build --config Release
@@ -179,7 +189,7 @@ jobs:
           Copy-Item "$ws\release\obs-plugins\64bit\*" "$dst\bin\64bit\" -Recurse -Force
           Copy-Item "$ws\release\data\obs-plugins\obs-playlist-deck\*" "$dst\data\" -Recurse -Force
           Compress-Archive -Path "$dst" -DestinationPath "$ws\obs-playlist-deck-windows.zip" -Force
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: obs-playlist-deck-windows
           path: obs-playlist-deck-windows.zip
@@ -189,14 +199,14 @@ jobs:
     needs: tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install dependencies
         run: brew install cmake ninja
 
       # --- OBS prebuilt universal deps (cached) ---
       - name: Cache obs-deps
         id: cache-deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             /tmp/obs-deps
@@ -219,7 +229,7 @@ jobs:
       # the cache stays valid across runs (deps are also at fixed /tmp paths).
       - name: Cache OBS dev
         id: cache-obsdev
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: /tmp/obs-dev
           key: obsdev-mac-universal-${{ env.OBS_VERSION }}-v1
@@ -346,7 +356,7 @@ jobs:
           codesign --force --deep --sign - "$bundle"
 
           tar -czf obs-playlist-deck-macos-universal.tar.gz -C macos-package obs-playlist-deck.plugin
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: obs-playlist-deck-macos
           path: obs-playlist-deck-macos-universal.tar.gz
@@ -371,7 +381,7 @@ jobs:
         # since OBS 30.0.)
         obs: ["31.0.0", "32.2.0-beta2"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -392,7 +402,7 @@ jobs:
             libpci-dev libpulse-dev libudev-dev libasound2-dev
       - name: Cache OBS dev
         id: cache-obsdev
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: /tmp/obs-dev
           key: obsdev-linux-${{ matrix.obs }}-v1
@@ -427,7 +437,7 @@ jobs:
     needs: tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Render icons
         run: |
           sudo apt-get update && sudo apt-get install -y librsvg2-bin zip
@@ -447,7 +457,7 @@ jobs:
           cd "${{ github.workspace }}/streamdeck"
           streamdeck pack com.angeloruggieridj.playlist-deck.sdPlugin --output "${{ github.workspace }}" || \
             echo "streamdeck pack unavailable/failed; zip artifact still produced"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: obs-playlist-deck-streamdeck
           path: |
@@ -476,9 +486,9 @@ jobs:
     steps:
       # Checkout first: download-artifact writes into the workspace and checkout
       # would wipe it.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Download packaged artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: release-assets
           merge-multiple: true
@@ -499,11 +509,11 @@ jobs:
       # publishes a sha256 digest per release asset, from the same source, and
       # the attestation covers each asset directly rather than by proxy.
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: release-assets/*
       - name: Create Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: release-notes.md
@@ -519,7 +529,7 @@ jobs:
       - name: Scan the packages with VirusTotal
         id: vt
         if: ${{ env.VT_API_KEY != '' }}
-        uses: crazy-max/ghaction-virustotal@v4
+        uses: crazy-max/ghaction-virustotal@d34968c958ae283fe976efed637081b9f9dcf74f # v4
         with:
           vt_api_key: ${{ secrets.VT_API_KEY }}
           files: |
