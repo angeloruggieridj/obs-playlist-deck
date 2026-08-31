@@ -160,8 +160,9 @@ class Manifest(unittest.TestCase):
             self.assertIsNone(obs_compat.load_manifest(Path(tmp) / "obs-compat.json"))
 
     def test_a_saved_manifest_round_trips(self):
-        built = obs_compat.build_manifest(
-            {version: ok() for version in GRID}, GRID, "32.2.2", None, "2026-08-31")
+        results = {version: ok() for version in GRID}
+        results["30.0.0"] = unbuildable()
+        built = obs_compat.build_manifest(results, GRID, "32.2.2", None, "2026-08-31")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "obs-compat.json"
             obs_compat.save_manifest(built, path)
@@ -192,6 +193,108 @@ class Manifest(unittest.TestCase):
             results, GRID, "32.2.2", "32.3.0-beta1", "2026-08-31")
         self.assertEqual(built["beta_tested"], "32.3.0-beta1")
         self.assertEqual(built["max_tested"], "32.2.2")
+
+
+def sample_manifest(**overrides) -> dict:
+    base = obs_compat.build_manifest(
+        {version: ok() for version in GRID}, GRID, "32.2.2", None, "2026-08-31")
+    base.update(overrides)
+    return base
+
+
+class ReadmeRendering(unittest.TestCase):
+    def test_the_table_states_the_range_and_the_built_against_version(self):
+        body = obs_compat.render_readme_section(sample_manifest())
+        self.assertIn("**30.0 – 32.2.2**", body)
+        self.assertIn("32.2.2", body)
+
+    def test_the_table_says_the_check_is_compile_and_link(self):
+        # Without this line "30.0+" promises more than the matrix verifies.
+        body = obs_compat.render_readme_section(sample_manifest())
+        self.assertIn("Compile and link", body)
+        self.assertIn("not a runtime test", body)
+
+    def test_unverifiable_minors_get_their_own_row(self):
+        body = obs_compat.render_readme_section(
+            sample_manifest(unverifiable=["30.0", "30.1"], min_supported="30.2"))
+        self.assertIn("Not verifiable in CI", body)
+        self.assertIn("30.0, 30.1", body)
+
+    def test_no_unverifiable_row_when_there_is_nothing_to_report(self):
+        self.assertNotIn("Not verifiable", obs_compat.render_readme_section(sample_manifest()))
+
+    def test_a_beta_gets_its_own_row_and_stays_out_of_the_range(self):
+        body = obs_compat.render_readme_section(sample_manifest(beta_tested="32.3.0-beta1"))
+        self.assertIn("32.3.0-beta1", body)
+        self.assertIn("**30.0 – 32.2.2**", body)
+
+    def test_the_static_rows_survive_generation(self):
+        body = obs_compat.render_readme_section(sample_manifest())
+        self.assertIn("Platforms", body)
+        self.assertIn("Qt", body)
+
+    def test_replacing_between_markers_leaves_the_rest_alone(self):
+        text = f"before\n{obs_compat.README_START}\nold\n{obs_compat.README_END}\nafter\n"
+        out = obs_compat.replace_between_markers(text, "new")
+        self.assertIn("before", out)
+        self.assertIn("after", out)
+        self.assertIn("new", out)
+        self.assertNotIn("old", out)
+
+    def test_missing_markers_are_an_error_not_a_silent_no_op(self):
+        with self.assertRaises(obs_compat.RangeError):
+            obs_compat.replace_between_markers("no markers here", "new")
+
+
+class WorkflowVersion(unittest.TestCase):
+    WORKFLOW = 'env:\n  OBS_VERSION: "32.1.2"\n  OBS_DEPS_VERSION: "2025-08-23"\n'
+
+    def test_it_reads_the_env_value(self):
+        self.assertEqual(obs_compat.workflow_obs_version(self.WORKFLOW), "32.1.2")
+
+    def test_it_rewrites_only_obs_version(self):
+        out = obs_compat.set_workflow_obs_version(self.WORKFLOW, "32.2.2")
+        self.assertIn('OBS_VERSION: "32.2.2"', out)
+        self.assertIn('OBS_DEPS_VERSION: "2025-08-23"', out)
+
+
+class WriteThenCheck(unittest.TestCase):
+    def _repo(self, tmp: Path, obs_version: str = "32.2.2") -> Path:
+        (tmp / ".github" / "workflows").mkdir(parents=True)
+        (tmp / "README.md").write_text(
+            f"## Compatibility\n\n{obs_compat.README_START}\nstale\n"
+            f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+        (tmp / ".github" / "workflows" / "build_project.yml").write_text(
+            f'env:\n  OBS_VERSION: "{obs_version}"\n', encoding="utf-8")
+        obs_compat.save_manifest(sample_manifest(), tmp / "obs-compat.json")
+        return tmp
+
+    def test_write_then_check_is_clean(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = self._repo(Path(name))
+            obs_compat.write(root)
+            self.assertEqual(obs_compat.check(root), [])
+
+    def test_check_flags_a_stale_readme(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = self._repo(Path(name))
+            problems = obs_compat.check(root)
+            self.assertTrue(any("README" in problem for problem in problems))
+
+    def test_check_flags_a_stale_obs_version(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = self._repo(Path(name), obs_version="32.1.2")
+            obs_compat.write(root)
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                'env:\n  OBS_VERSION: "32.1.2"\n', encoding="utf-8")
+            problems = obs_compat.check(root)
+            self.assertTrue(any("OBS_VERSION" in problem for problem in problems))
+
+    def test_check_reports_a_missing_manifest_rather_than_crashing(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / "README.md").write_text("nothing", encoding="utf-8")
+            self.assertTrue(any("obs-compat.json" in problem for problem in obs_compat.check(root)))
 
 
 if __name__ == "__main__":

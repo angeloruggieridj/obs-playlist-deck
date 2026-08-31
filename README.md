@@ -309,11 +309,13 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 
 ## Compatibility
 
+<!-- obs-compat:start -->
 | | |
 |---|---|
 | **OBS Studio** | **31.0+** (CI-certified). Built and tested against **32.1.2**. |
 | **Platforms** | Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon) |
 | **Qt** | Qt 6 |
+<!-- obs-compat:end -->
 
 ## Building from source
 

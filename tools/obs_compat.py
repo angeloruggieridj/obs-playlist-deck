@@ -187,3 +187,96 @@ def build_manifest(results: dict[str, dict], grid: list[str], max_tested: str,
         "unverifiable": derived["unverifiable"],
         "results": dict(sorted(results.items())),
     }
+
+
+README_START = "<!-- obs-compat:start -->"
+README_END = "<!-- obs-compat:end -->"
+WORKFLOW_REL = Path(".github") / "workflows" / "build_project.yml"
+
+# Static rows. A Markdown table cannot be split by an HTML comment and still
+# render, so the generator owns the whole table; edit these here.
+STATIC_ROWS = [
+    ("Platforms", "Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon)"),
+    ("Qt", "Qt 6"),
+]
+
+_OBS_VERSION = re.compile(r'^(\s*OBS_VERSION:\s*")([^"]*)(")', re.MULTILINE)
+
+
+def render_readme_section(manifest: dict) -> str:
+    rows = [
+        ("OBS Studio", f"**{manifest['min_supported']} – {manifest['max_tested']}**"),
+        ("Verified by",
+         "Compile and link against each version's OBS SDK in CI — not a runtime test."),
+        ("Built against", manifest["max_tested"]),
+    ]
+    if manifest.get("beta_tested"):
+        rows.append(("Also builds against", f"{manifest['beta_tested']} (prerelease, not supported)"))
+    if manifest.get("unverifiable"):
+        rows.append(("Not verifiable in CI", ", ".join(manifest["unverifiable"])))
+    rows.extend(STATIC_ROWS)
+    lines = ["| | |", "|---|---|"]
+    lines += [f"| **{label}** | {value} |" for label, value in rows]
+    return "\n".join(lines)
+
+
+def replace_between_markers(text: str, body: str) -> str:
+    start, end = text.find(README_START), text.find(README_END)
+    if start == -1 or end == -1 or end < start:
+        raise RangeError(f"README is missing the {README_START} / {README_END} markers")
+    return text[:start] + README_START + "\n" + body + "\n" + text[end:]
+
+
+def workflow_obs_version(text: str) -> str:
+    match = _OBS_VERSION.search(text)
+    if not match:
+        raise RangeError("no OBS_VERSION in the workflow")
+    return match.group(2)
+
+
+def set_workflow_obs_version(text: str, version: str) -> str:
+    return _OBS_VERSION.sub(lambda m: m.group(1) + version + m.group(3), text, count=1)
+
+
+def write(root: Path = ROOT) -> None:
+    """Render the README section and move OBS_VERSION to match the manifest.
+
+    They move together because OBS_VERSION is the version the shipped binaries
+    are compiled against: letting it lag behind max_tested is how "built and
+    tested against X" quietly stops being true.
+    """
+    manifest = load_manifest(root / "obs-compat.json")
+    if manifest is None:
+        raise RangeError("no obs-compat.json to render from; run --report first")
+
+    readme = root / "README.md"
+    readme.write_text(
+        replace_between_markers(readme.read_text(encoding="utf-8"),
+                                render_readme_section(manifest)),
+        encoding="utf-8")
+
+    workflow = root / WORKFLOW_REL
+    workflow.write_text(
+        set_workflow_obs_version(workflow.read_text(encoding="utf-8"), manifest["max_tested"]),
+        encoding="utf-8")
+
+
+def check(root: Path = ROOT) -> list[str]:
+    """Offline consistency: README, manifest and OBS_VERSION must agree."""
+    manifest = load_manifest(root / "obs-compat.json")
+    if manifest is None:
+        return ["obs-compat.json is missing; run tools/obs_compat.py --report"]
+
+    problems = []
+    expected = render_readme_section(manifest)
+    if expected not in (root / "README.md").read_text(encoding="utf-8"):
+        problems.append(
+            "README compatibility table does not match obs-compat.json; "
+            "run: python3 tools/obs_compat.py --write")
+
+    found = workflow_obs_version((root / WORKFLOW_REL).read_text(encoding="utf-8"))
+    if found != manifest["max_tested"]:
+        problems.append(
+            f"workflow OBS_VERSION is {found} but the manifest was tested against "
+            f"{manifest['max_tested']}; run: python3 tools/obs_compat.py --write")
+    return problems
