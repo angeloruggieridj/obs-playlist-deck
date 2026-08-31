@@ -125,13 +125,40 @@ The session used to be rewritten on every rebuild — once per added file, per
 probed duration, per reorder. It is debounced to at most one write per 800 ms,
 flushed on exit.
 
-## 11. What is deliberately *not* done
+## 11. The library is content, not a preference
 
-- **A `QAbstractListModel` for the list.** The delegate is custom, but the view
-  is still a `QListWidget`. Moving to a model means rewriting drag-reorder,
-  inline rename and selection — three things that can only be verified by hand,
-  in OBS. The performance argument that motivated it mostly disappeared when the
-  per-rebuild `stat()` did.
+Named playlists, their watch folders and their scheduled starts are always
+saved and always restored. There is no "restore on startup" switch any more: a
+deck that forgot the sets someone named would be broken, not configurable.
+
+That raises the stakes on the file, so it is copied aside when OBS starts, when
+it closes, and every ten minutes of editing, twenty copies deep. Restoring one
+backs up what is currently there first — restoring must not be the operation
+that loses today's work.
+
+## 12. An end that arrives before a start is not that clip's end
+
+Handing a media source a new file makes it report that the *outgoing* media
+ended, on top of the end that prompted the change. Acted on, that advanced the
+playlist twice (1.3.1). The engine ignores an end until the source says the clip
+it was given has started; the flag clears either way, so a source that never
+reports a start costs at most one missed advance rather than wedging the deck.
+
+## 13. The list is a model, and edits are requests
+
+The view no longer owns the data. Reordering and renaming are signals the dock
+answers, applying them through the undo history and handing back rows — a model
+that mutated the playlist directly would have to reimplement undo, or lose it.
+`dropMimeData()` deliberately returns `false` after emitting its request: `true`
+would have the view delete the source rows itself, on top of the reorder the
+dock is about to perform.
+
+## 14. What is deliberately *not* done
+
+- **Driving a source whose settings are unknown.** The deck reads media paths
+  out of any source that holds them, and imports those. It writes only the two
+  settings shapes it has verified against OBS's own source code. Guessing the
+  third is precisely the mistake that left VLC support inert for three releases.
 - **A `clang-format` gate in CI.** The config is in the repository; the gate is
   not. Several tests read the sources as text, so a wholesale reformat would
   fail tests unrelated to the change.
