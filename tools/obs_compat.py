@@ -404,17 +404,35 @@ def fetch_tags(token: str | None) -> list[str]:
     return tags
 
 
+# Exit 1 means one thing and only one thing: the plugin does not compile
+# against a probed OBS version. Nothing else -- not a bad artifact, not a
+# missing argument, not an unexpected exception -- may ever produce it.
 EXIT_OK = 0
 EXIT_INCOMPATIBLE = 1
 EXIT_STALE = 2
 EXIT_NO_RANGE = 3
+EXIT_BAD_INPUT = 4
 
 
 def aggregate(artifact_dir: Path) -> dict[str, dict]:
+    """One result per probe artifact, skipping any file this run cannot read.
+
+    The probe job that produces these files is explicitly allowed to fail, so
+    a truncated or half-written artifact is a realistic input, not a
+    hypothetical. Omitting it here is the semantically right answer, not a
+    dodge: a version with no usable result is exactly what derive_range
+    already classifies as unverifiable -- the same rule it applies to a probe
+    that never reported at all. An unreadable result must never read as an
+    incompatible one.
+    """
     results: dict[str, dict] = {}
     for path in sorted(artifact_dir.glob("**/compat-*.json")):
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        version = payload.pop("obs")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            version = payload.pop("obs")
+        except (json.JSONDecodeError, KeyError, OSError) as error:
+            print(f"::warning::skipping unreadable artifact {path}: {error}", file=sys.stderr)
+            continue
         results[version] = payload
     return results
 
@@ -436,6 +454,11 @@ def summary_table(manifest: dict) -> str:
 def _emit_output(name: str, value: str) -> None:
     path = os.environ.get("GITHUB_OUTPUT")
     if path:
+        # __EOF__ is a fixed delimiter, which would normally be a collision
+        # risk. It is provably safe here: every value this function is ever
+        # called with is a tag matched by _TAG (whose charset excludes
+        # underscores) or JSON built from such tags, so __EOF__ can never
+        # appear inside the value it delimits.
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(f"{name}<<__EOF__\n{value}\n__EOF__\n")
     else:
@@ -514,8 +537,15 @@ def main() -> int:
         if args.discover:
             return _discover()
         if args.report:
-            return _report(args.artifacts, json.loads(args.grid),
-                           args.latest_stable, args.beta or None)
+            if not args.grid or not args.latest_stable:
+                print("::error::--report requires --grid and --latest-stable", file=sys.stderr)
+                return EXIT_BAD_INPUT
+            try:
+                grid = json.loads(args.grid)
+            except json.JSONDecodeError as error:
+                print(f"::error::--grid is not valid JSON: {error}", file=sys.stderr)
+                return EXIT_BAD_INPUT
+            return _report(args.artifacts, grid, args.latest_stable, args.beta or None)
         if args.write:
             write()
             print("ok: README and OBS_VERSION now match obs-compat.json")
@@ -527,6 +557,12 @@ def main() -> int:
     except RangeError as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_NO_RANGE
+    except Exception as error:
+        # Nothing below this line may be allowed to fall through to Python's
+        # own default exit status of 1 -- that number is reserved, in this
+        # tool, for a genuine incompatibility, and an uncaught crash is not one.
+        print(f"::error::unexpected {type(error).__name__}: {error}", file=sys.stderr)
+        return EXIT_BAD_INPUT
 
 
 if __name__ == "__main__":

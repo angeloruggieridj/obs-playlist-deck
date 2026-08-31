@@ -7,6 +7,7 @@ offline against a fixture of the OBS tag list rather than against the live API.
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -497,6 +498,64 @@ class Aggregate(unittest.TestCase):
         with tempfile.TemporaryDirectory() as name:
             self.assertEqual(obs_compat.aggregate(Path(name)), {})
 
+    def test_an_empty_artifact_file_is_skipped_not_fatal(self):
+        # The probe job that writes these files is explicitly allowed to
+        # fail, so a truncated (here: zero-byte) artifact is realistic input.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            broken = root / "compat-30.0.0"
+            broken.mkdir()
+            (broken / "compat-30.0.0.json").write_text("", encoding="utf-8")
+            good = root / "compat-32.2.2"
+            good.mkdir()
+            (good / "compat-32.2.2.json").write_text(
+                json.dumps({"obs": "32.2.2", **ok()}), encoding="utf-8")
+            self.assertEqual(obs_compat.aggregate(root), {"32.2.2": ok()})
+
+    def test_a_malformed_artifact_file_is_skipped_not_fatal(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            broken = root / "compat-30.0.0"
+            broken.mkdir()
+            (broken / "compat-30.0.0.json").write_text("{not valid json", encoding="utf-8")
+            good = root / "compat-32.2.2"
+            good.mkdir()
+            (good / "compat-32.2.2.json").write_text(
+                json.dumps({"obs": "32.2.2", **ok()}), encoding="utf-8")
+            self.assertEqual(obs_compat.aggregate(root), {"32.2.2": ok()})
+
+    def test_an_artifact_missing_the_obs_key_is_skipped_not_fatal(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            broken = root / "compat-30.0.0"
+            broken.mkdir()
+            (broken / "compat-30.0.0.json").write_text(json.dumps(ok()), encoding="utf-8")
+            good = root / "compat-32.2.2"
+            good.mkdir()
+            (good / "compat-32.2.2.json").write_text(
+                json.dumps({"obs": "32.2.2", **ok()}), encoding="utf-8")
+            self.assertEqual(obs_compat.aggregate(root), {"32.2.2": ok()})
+
+    def test_a_version_with_an_unreadable_artifact_is_unverifiable_not_a_gap(self):
+        # This is the semantic the fix exists to pin: an unreadable result
+        # must read exactly like a probe that never reported, never like a
+        # confirmed incompatibility.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            for version in GRID:
+                folder = root / f"compat-{version}"
+                folder.mkdir()
+                if version == "30.0.0":
+                    (folder / f"compat-{version}.json").write_text(
+                        "{not valid json", encoding="utf-8")
+                else:
+                    (folder / f"compat-{version}.json").write_text(
+                        json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            results = obs_compat.aggregate(root)
+            derived = obs_compat.derive_range(results, GRID, "32.2.2")
+            self.assertEqual(derived["unverifiable"], ["30.0"])
+            self.assertEqual(derived["gaps"], [])
+
 
 class SummaryTable(unittest.TestCase):
     def test_it_names_the_phase_of_every_failure(self):
@@ -510,8 +569,30 @@ class SummaryTable(unittest.TestCase):
 class ExitCodes(unittest.TestCase):
     def test_the_codes_are_distinct(self):
         codes = {obs_compat.EXIT_OK, obs_compat.EXIT_INCOMPATIBLE,
-                 obs_compat.EXIT_STALE, obs_compat.EXIT_NO_RANGE}
-        self.assertEqual(len(codes), 4)
+                 obs_compat.EXIT_STALE, obs_compat.EXIT_NO_RANGE,
+                 obs_compat.EXIT_BAD_INPUT}
+        self.assertEqual(len(codes), 5)
+
+
+class ReportRequiresItsArguments(unittest.TestCase):
+    # Exit 1 is reserved for a genuine incompatibility; malformed CLI input
+    # must never fall through argparse/json.loads into Python's default
+    # exit-status-1 crash and be mistaken for one.
+    def test_report_without_grid_is_bad_input_not_exit_1(self):
+        argv = ["obs_compat.py", "--report", "--latest-stable", "32.2.2"]
+        with mock.patch.object(sys, "argv", argv):
+            self.assertEqual(obs_compat.main(), obs_compat.EXIT_BAD_INPUT)
+
+    def test_report_without_latest_stable_is_bad_input(self):
+        argv = ["obs_compat.py", "--report", "--grid", "[]"]
+        with mock.patch.object(sys, "argv", argv):
+            self.assertEqual(obs_compat.main(), obs_compat.EXIT_BAD_INPUT)
+
+    def test_report_with_unparseable_grid_is_bad_input(self):
+        argv = ["obs_compat.py", "--report", "--grid", "not-json",
+                "--latest-stable", "32.2.2"]
+        with mock.patch.object(sys, "argv", argv):
+            self.assertEqual(obs_compat.main(), obs_compat.EXIT_BAD_INPUT)
 
 
 if __name__ == "__main__":
