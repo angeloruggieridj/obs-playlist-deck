@@ -7,6 +7,7 @@
 #include <QPointer>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 #include <QWidget>
 #include <memory>
 #include <mutex>
@@ -15,23 +16,23 @@
 #include <obs.h>
 #include "EndMode.hpp"
 #include "History.hpp"
+#include "Library.hpp"
 #include "MediaScanner.hpp"
 #include "MediaSourceController.hpp"
-#include "SettingsStore.hpp"
-#include "Playlist.hpp"
 #include "PlaybackEngine.hpp"
-#include "Shuffle.hpp"
-#include "Staging.hpp"
+#include "Playlist.hpp"
+#include "SettingsStore.hpp"
 
 class QComboBox;
+class QFileSystemWatcher;
 class QFrame;
 class QLabel;
 class QLineEdit;
-class QListWidgetItem;
 class QPushButton;
 class QSlider;
 class QTimer;
-class PlaylistListWidget;
+class PlaylistModel;
+class PlaylistView;
 class UpdateChecker;
 
 // What the remote-control API reports. Read from the websocket thread, written
@@ -50,14 +51,17 @@ struct DeckStatus {
     long long durationMs = -1;
     bool playing = false;
     bool paused = false;
-    bool sourceBound = false;
     bool muted = false;
+    bool sourceBound = false;
     QString sourceName;
     int mode = 0;
     QString modeName;
     QString playlistName;
+    int playlistIndex = 0;
+    QStringList playlists;
     int upNextIndex = -1;
     QString upNextTitle;
+    long long scheduledStartMs = -1;
     // title/path pairs, for the paginated GetItems request.
     QList<QPair<QString, QString>> items;
 };
@@ -76,7 +80,7 @@ public:
 
     // Second-stage init, run on OBS_FRONTEND_EVENT_FINISHED_LOADING. The dock
     // is registered from obs_module_load() so OBS restores its saved state, but
-    // everything touching sources, the session or hotkeys needs the frontend to
+    // everything touching sources, the library or hotkeys needs the frontend to
     // have finished loading first.
     void frontendLoaded();
 
@@ -106,6 +110,8 @@ public:
     Q_INVOKABLE void wsSave(const QString& path);
     Q_INVOKABLE void wsMove(int from, int to);
     Q_INVOKABLE void wsRemove(int index);
+    Q_INVOKABLE void wsSwitchPlaylist(const QString& name);
+    Q_INVOKABLE void wsPanic();
 
     // Thread-safe copy for the websocket thread.
     DeckStatus status() const;
@@ -134,6 +140,7 @@ private slots:
     // OBS audio mixer, which is why the dock listens instead of remembering.
     void onMuteChanged(bool muted);
     void onStop();
+    void onPanic();
     void onNext();
     void onPrev();
     void onUndo();
@@ -142,20 +149,27 @@ private slots:
     void onSavePlaylist();
     void onOpenPlaylist();
     void onExportCsv();
+    void onImportFromSource();
     void onMediaEnded();
     void onMediaStarted();
     void onSourceDeactivated();
     void onFilesDropped(const QStringList& paths);
-    void onListReordered();
+    void onRowsMoved(const QVector<int>& rows, int destination);
     void onFilterChanged(const QString& text);
     void onTick();
     void onOpenSettings();
     void onScanResults(const QList<ScanResult>& results);
     void onRecheckFiles();
-    void onItemRenamed(QListWidgetItem* item);
+    void onFindMoved();
+    void onItemRenamed(int index, const QString& title);
     void onContextMenu(const QPoint& pos);
     void onSeekReleased();
     void onUpdateResult(const QString& body, const QString& error, bool manual);
+    // Playlist library.
+    void onPlaylistSelected(int index);
+    void onPlaylistMenu();
+    void onPlaylistProperties();
+    void onWatchedFolderChanged();
 
 protected:
     // Theme switches (OBS 31 can change theme while running) and the dock being
@@ -174,6 +188,7 @@ private:
     void updateTotals();
     void updateTransportIcons();
     void updateMuteButton();
+    void updatePlaylistCombo();
     QString itemText(int row) const;
     void addPaths(const QStringList& paths, bool recordUndo = true);
     void playIndex(int row);
@@ -186,6 +201,8 @@ private:
     bool writePlaylistTo(const QString& path);
     // Shared by the Remove button, the Delete key and the remote request.
     void removeRows(std::vector<int> rows);
+    // Rows the user has selected, as playlist indices.
+    std::vector<int> selectedRows() const;
     void setLoadedPlaylist(const QString& path);
     void setStatus(const QString& msg, StatusKind kind = StatusKind::Info);
     QIcon tintedIcon(const QString& resource) const;
@@ -215,12 +232,19 @@ private:
     void loadSettings();
     void applyLocale();           // sets the module locale from the chosen language
     void applyLocaleAndRebuild(); // applyLocale() + rebuild the UI in the new language
-    void saveSession() const;
-    void scheduleSessionSave(); // debounced; the session used to be rewritten on every rebuild
-    void loadSession();
 
-    // Retitles the QDockWidget OBS wrapped this widget in (language change).
-    void applyDockTitle();
+    // ---- Playlist library ----
+    void loadLibrary();
+    // Copies the live playlist back into the active library entry. Everything
+    // that persists or switches goes through this first.
+    void commitToLibrary();
+    void activateLibraryEntry(int index);
+    void saveLibrarySoon(); // debounced
+    void saveLibraryNow();
+    void applyWatchFolder();
+    void scanWatchFolder();
+    // Fires a scheduled start when its moment arrives.
+    void checkSchedule();
 
     void registerHotkeys();
     void unregisterHotkeys();
@@ -235,19 +259,22 @@ private:
     // the dock only reacts to what the engine decided.
     pld::PlaybackEngine engine_{playlist_, controller_, rng_};
     pld::History history_;
+    pld::Library library_;
     SettingsStore store_;
     DeckSettings settings_;
     MediaScanner* scanner_ = nullptr;
     UpdateChecker* updateChecker_ = nullptr;
+    QFileSystemWatcher* watcher_ = nullptr;
 
     bool obsShutdown_ = false;
-    bool refreshing_ = false; // true while refreshSources() repopulates the combo
-    bool renaming_ = false;   // true while an inline rename is being applied
-    bool stagePauseWanted_ = false; // a staged clip must pause as soon as it opens
-    int captureRow_ = -1;           // item whose duration the next media_started belongs to
+    bool refreshing_ = false;        // true while refreshSources() repopulates the combo
+    bool switchingPlaylist_ = false; // true while the library combo is repopulated
+    bool stagePauseWanted_ = false;  // a staged clip must pause as soon as it opens
+    int captureRow_ = -1;            // item whose duration the next media_started belongs to
     QString capturePath_;
     int captureRetries_ = 0;
-    QString loadedPath_; // currently loaded playlist file, for label restore
+    // Start time the scheduler has already honoured, so it fires once.
+    long long lastScheduleFiredMs_ = -1;
 
     // Existence of each path, so rebuilding the list does not stat() every item
     // again. Filled by the scanner thread; a missing entry means "not checked
@@ -259,8 +286,10 @@ private:
     qint64 lastStateEventMs_ = 0;
 
     QWidget* content_ = nullptr; // what buildUi() fills; replaced on rebuild
+    QComboBox* playlistCombo_ = nullptr;
     QComboBox* sourceCombo_ = nullptr;
-    PlaylistListWidget* list_ = nullptr;
+    PlaylistModel* model_ = nullptr;
+    PlaylistView* list_ = nullptr;
     QLineEdit* filterEdit_ = nullptr;
     QLabel* filterCount_ = nullptr;
     QComboBox* endCombo_ = nullptr;
@@ -280,7 +309,8 @@ private:
     QPushButton* undoBtn_ = nullptr;
     QTimer* uiTimer_ = nullptr;
     QTimer* statusTimer_ = nullptr;
-    QTimer* sessionTimer_ = nullptr;
+    QTimer* libraryTimer_ = nullptr;
+    QTimer* watchTimer_ = nullptr;
 
     // Every icon button, so a theme switch can re-tint all of them, paired with
     // the resource each one draws.

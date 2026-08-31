@@ -18,6 +18,58 @@ std::vector<std::string> MediaSourceController::listMediaSources() {
     return out;
 }
 
+namespace {
+// The playlist-shaped settings this plugin knows how to read. "playlist" is
+// what VLC uses and what every playlist-like source that followed it copied.
+std::vector<std::string> pathsFromSettings(obs_data_t* settings) {
+    std::vector<std::string> out;
+    if (!settings) return out;
+    obs_data_array_t* arr = obs_data_get_array(settings, "playlist");
+    if (arr) {
+        const size_t count = obs_data_array_count(arr);
+        for (size_t i = 0; i < count; ++i) {
+            obs_data_t* entry = obs_data_array_item(arr, i);
+            if (!entry) continue;
+            const char* v = obs_data_get_string(entry, "value");
+            if (v && *v) out.emplace_back(v);
+            obs_data_release(entry);
+        }
+        obs_data_array_release(arr);
+        return out;
+    }
+    const char* single = obs_data_get_string(settings, "local_file");
+    if (single && *single) out.emplace_back(single);
+    return out;
+}
+} // namespace
+
+std::vector<std::string> MediaSourceController::listPlaylistCapableSources() {
+    std::vector<std::string> out;
+    auto cb = [](void* param, obs_source_t* src) -> bool {
+        obs_data_t* settings = obs_source_get_settings(src);
+        const bool holdsPaths = !pathsFromSettings(settings).empty();
+        obs_data_release(settings);
+        if (holdsPaths) {
+            const char* name = obs_source_get_name(src);
+            if (name) static_cast<std::vector<std::string>*>(param)->emplace_back(name);
+        }
+        return true;
+    };
+    obs_enum_sources(cb, &out);
+    return out;
+}
+
+std::vector<std::string> MediaSourceController::readSourcePlaylist(const std::string& sourceName) {
+    std::vector<std::string> out;
+    obs_source_t* src = obs_get_source_by_name(sourceName.c_str());
+    if (!src) return out;
+    obs_data_t* settings = obs_source_get_settings(src);
+    out = pathsFromSettings(settings);
+    obs_data_release(settings);
+    obs_source_release(src);
+    return out;
+}
+
 MediaSourceController::~MediaSourceController() { unbind(); }
 
 void MediaSourceController::bind(const std::string& sourceName) {

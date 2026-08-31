@@ -24,6 +24,15 @@ public:
 
     static std::vector<std::string> listMediaSources();
 
+    // Sources that hold a list of media paths in their settings — a VLC source,
+    // OBS's own playlist source, whatever a plugin adds. Reading one is
+    // generic; driving one is not, which is why these are offered for import
+    // rather than added to the bindable list. Writing settings this plugin has
+    // never seen is the mistake that left VLC support inert for three releases.
+    static std::vector<std::string> listPlaylistCapableSources();
+    // The media paths a source holds, in order. Empty when it holds none.
+    static std::vector<std::string> readSourcePlaylist(const std::string& sourceName);
+
     void bind(const std::string& sourceName);
     void unbind();
     bool isBound() const { return source_ != nullptr; }
