@@ -78,7 +78,8 @@ TEST_CASE("the curl handle is configured for safe use inside OBS") {
 TEST_CASE("no plugin code detaches a thread") {
     for (const char* file :
          {"src/plugin/UpdateChecker.cpp", "src/plugin/PlaylistDock.cpp",
-          "src/plugin/MediaScanner.cpp", "src/plugin/plugin-main.cpp"}) {
+          "src/plugin/MediaScanner.cpp", "src/plugin/plugin-main.cpp",
+          "src/plugin/PlaylistModel.cpp", "src/plugin/PlaylistView.cpp"}) {
         const std::string source = readSource(file);
         CAPTURE(file);
         REQUIRE_FALSE(source.empty());

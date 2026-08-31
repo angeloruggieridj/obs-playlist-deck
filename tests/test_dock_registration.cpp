@@ -82,7 +82,7 @@ TEST_CASE("source-dependent setup is deferred to FINISHED_LOADING") {
     const std::string loaded = bodyOf(dock, "void PlaylistDock::frontendLoaded()");
     REQUIRE_FALSE(loaded.empty());
     CHECK(loaded.find("refreshSources()") != std::string::npos);
-    CHECK(loaded.find("loadSession()") != std::string::npos);
+    CHECK(loaded.find("loadLibrary()") != std::string::npos);
     CHECK(loaded.find("clearStalePluginFile()") != std::string::npos);
     CHECK(loaded.find("registerHotkeys()") != std::string::npos);
 

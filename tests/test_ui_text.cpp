@@ -83,7 +83,7 @@ static_assert(u"\xE2\x86\x97"[2] == 0x0097, "which is why the arrow came out as 
 // QStringLiteral has to be a universal character name, which the compiler
 // transcodes correctly whatever the source and execution charsets are.
 TEST_CASE("no QStringLiteral carries raw bytes instead of characters") {
-    for (const char* file : {"src/plugin/PlaylistDock.cpp", "src/plugin/PlaylistListWidget.cpp",
+    for (const char* file : {"src/plugin/PlaylistDock.cpp", "src/plugin/PlaylistView.cpp",
                              "src/plugin/plugin-main.cpp", "src/plugin/MediaScanner.cpp",
                              "src/plugin/UpdateChecker.cpp", "src/plugin/DeckStyle.cpp"}) {
         const std::string source = readSource(file);
@@ -161,7 +161,7 @@ TEST_CASE("toolbar buttons are icon-only with a localized tooltip") {
     // the accessible name, the Tip.* key the tooltip.
     for (const char* key : {"Refresh", "Add", "Remove", "Up", "Down", "Clear", "Play", "Prev",
                             "Pause", "Stop", "Next", "Save", "Open", "Settings", "Rename",
-                            "Undo", "Mute"}) {
+                            "Undo", "Mute", "Panic"}) {
         CAPTURE(key);
         CHECK(dock.find(std::string("T(\"Btn.") + key + "\")") != std::string::npos);
         CHECK(dock.find(std::string("T(\"Tip.") + key + "\")") != std::string::npos);

@@ -113,7 +113,7 @@ TEST_CASE("state is written atomically and the session write is debounced") {
     CHECK(dock.find("QIODevice::WriteOnly") == std::string::npos);
     CHECK(bodyOf(store, "bool SettingsStore::saveSettings").find("writeAtomically") !=
           std::string::npos);
-    CHECK(bodyOf(store, "bool SettingsStore::saveSession").find("writeAtomically") !=
+    CHECK(bodyOf(store, "bool SettingsStore::saveLibrary").find("writeAtomically") !=
           std::string::npos);
     // The user's own playlist file gets the same treatment.
     CHECK(bodyOf(dock, "bool PlaylistDock::writePlaylistTo").find("writeAtomically") !=
@@ -122,18 +122,106 @@ TEST_CASE("state is written atomically and the session write is debounced") {
     // rebuildList() schedules a save instead of performing one.
     const std::string rebuild = bodyOf(dock, "void PlaylistDock::rebuildList()");
     REQUIRE_FALSE(rebuild.empty());
-    CHECK(rebuild.find("scheduleSessionSave()") != std::string::npos);
-    CHECK(rebuild.find("saveSession()") == std::string::npos);
+    CHECK(rebuild.find("saveLibrarySoon()") != std::string::npos);
+    CHECK(rebuild.find("saveLibraryNow()") == std::string::npos);
     // And a pending debounce is flushed on the way out.
-    CHECK(bodyOf(dock, "void PlaylistDock::shutdown()").find("saveSession()") !=
-          std::string::npos);
+    CHECK(bodyOf(dock, "void PlaylistDock::shutdown()").find("saveLibrary") != std::string::npos);
 
     // M-3: the schema version was written from the start but never read.
-    CHECK(bodyOf(store, "SessionData SettingsStore::loadSession").find("\"version\"") !=
+    CHECK(bodyOf(store, "LibraryData SettingsStore::loadLibrary").find("\"version\"") !=
           std::string::npos);
     // F-26: the playlist came back but the label claimed nothing was loaded.
-    CHECK(bodyOf(store, "bool SettingsStore::saveSession").find("loadedPath") !=
+    CHECK(bodyOf(store, "bool SettingsStore::saveLibrary").find("toLibraryJson") !=
           std::string::npos);
+}
+
+// NF-4/NF-15. The library is the deck's content, not a preference: it is always
+// written and always restored, and a 1.3.x session file becomes its first
+// playlist rather than being left behind.
+TEST_CASE("the playlist library persists, migrates and is backed up") {
+    const std::string store = readSource("src/plugin/SettingsStore.cpp");
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+
+    const std::string load = bodyOf(store, "LibraryData SettingsStore::loadLibrary");
+    REQUIRE_FALSE(load.empty());
+    CHECK(load.find("session.json") != std::string::npos); // the migration path
+    CHECK(load.find("migrated = true") != std::string::npos);
+
+    // Backups are rate-limited, capped, and forced at the two moments that
+    // matter: the start of a session and the end of one.
+    CHECK(store.find("kMaxBackups") != std::string::npos);
+    CHECK(store.find("kBackupIntervalMs") != std::string::npos);
+    CHECK(bodyOf(dock, "void PlaylistDock::shutdown()").find("backupLibrary(/*force=*/true)") !=
+          std::string::npos);
+    CHECK(bodyOf(dock, "void PlaylistDock::loadLibrary()").find("backupLibrary(/*force=*/true)") !=
+          std::string::npos);
+    // Restoring one backs up what is there first: it must not be the thing that
+    // loses today's work.
+    CHECK(dock.find("Status.BackupRestored") != std::string::npos);
+
+    // Switching playlists writes the live one back first, or the edits made to
+    // it since the last save would be dropped.
+    const std::string switched = bodyOf(dock, "void PlaylistDock::onPlaylistSelected");
+    REQUIRE_FALSE(switched.empty());
+    CHECK(switched.find("commitToLibrary()") != std::string::npos);
+}
+
+// NF-5/NF-6. Both act on their own, so both are per-playlist and both say so on
+// screen before anything happens.
+TEST_CASE("watch folder and scheduled start are per playlist, and announced") {
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    const std::string library = readSource("src/core/Library.hpp");
+
+    CHECK(library.find("watchFolder") != std::string::npos);
+    CHECK(library.find("scheduledStartMs") != std::string::npos);
+
+    // A file being copied in is not a file to add yet.
+    CHECK(dock.find("kWatchDebounceMs") != std::string::npos);
+    CHECK(dock.find("QFileSystemWatcher") != std::string::npos);
+    // Adding the same path twice is what a watched folder would otherwise do on
+    // every change.
+    CHECK(bodyOf(dock, "void PlaylistDock::addPaths").find("known.count(p)") != std::string::npos);
+
+    // The schedule fires once, from the pure rule, and the card counts down to
+    // it: the deck acting on its own must never be a surprise.
+    CHECK(dock.find("pld::shouldFireSchedule") != std::string::npos);
+    CHECK(dock.find("lastScheduleFiredMs_") != std::string::npos);
+    CHECK(dock.find("Card.StartingIn") != std::string::npos);
+}
+
+// NF-8. Stopping is not enough on its own: a stopped media source holds its
+// last frame on air.
+TEST_CASE("panic stops and cuts away") {
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    const std::string body = bodyOf(dock, "void PlaylistDock::onPanic()");
+    REQUIRE_FALSE(body.empty());
+    CHECK(body.find("controller_.stop()") != std::string::npos);
+    CHECK(body.find("obs_frontend_set_current_scene") != std::string::npos);
+    CHECK(body.find("obs_source_release(scene)") != std::string::npos);
+    // Without a scene configured it still stops, and says why nothing else
+    // happened rather than failing silently.
+    CHECK(body.find("Status.PanicStopped") != std::string::npos);
+    // It is reachable from a hotkey and from the remote API, which is where a
+    // panic button is actually pressed.
+    CHECK(dock.find("obs-playlist-deck.panic") != std::string::npos);
+    CHECK(readSource("src/plugin/plugin-main.cpp").find("\"Panic\"") != std::string::npos);
+}
+
+// NF-13. Reading another source's playlist is generic; writing settings this
+// plugin has never seen is what left VLC support inert for three releases.
+TEST_CASE("importing from an OBS source reads, and never writes") {
+    const std::string controller = readSource("src/plugin/MediaSourceController.cpp");
+    const std::string import =
+        bodyOf(controller, "std::vector<std::string> MediaSourceController::readSourcePlaylist");
+    REQUIRE_FALSE(import.empty());
+    CHECK(import.find("obs_source_update") == std::string::npos);
+    CHECK(import.find("obs_data_set") == std::string::npos);
+    CHECK(controller.find("pathsFromSettings") != std::string::npos);
+    // Only the two source types whose settings are known stay bindable.
+    const std::string kinds = readSource("src/core/SourceKind.cpp");
+    CHECK(kinds.find("ffmpeg_source") != std::string::npos);
+    CHECK(kinds.find("vlc_source") != std::string::npos);
+    CHECK(kinds.find("playlist_source") == std::string::npos);
 }
 
 // F-5. rebuildList() stat()ed every path on every call — that is every add,
@@ -265,11 +353,37 @@ TEST_CASE("hotkey targets are owned, and outlive their hotkeys") {
     CHECK(unregisterAt < clearAt); // order matters, and this is why
 }
 
+// P-2. Every change to the list used to mean clearing the widget and building
+// every row again, throwing away the selection, the scroll position and any
+// open editor with them. A model can say "this row changed".
+TEST_CASE("the list is a model and a view, and scan results do not reset it") {
+    const std::string model = readSource("src/plugin/PlaylistModel.cpp");
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+
+    CHECK(readSource("src/plugin/PlaylistModel.hpp").find("public QAbstractListModel") !=
+          std::string::npos);
+    CHECK(readSource("src/plugin/PlaylistView.hpp").find("public QListView") !=
+          std::string::npos);
+    // A batch of durations arriving updates rows; it does not reset the model.
+    const std::string scan = bodyOf(dock, "void PlaylistDock::onScanResults");
+    REQUIRE_FALSE(scan.empty());
+    CHECK(scan.find("model_->updateRow") != std::string::npos);
+
+    // Reordering and renaming are requests: the dock owns the playlist and
+    // applies them through the undo history.
+    CHECK(model.find("emit renameRequested") != std::string::npos);
+    CHECK(model.find("emit moveRequested") != std::string::npos);
+    CHECK(bodyOf(dock, "void PlaylistDock::onRowsMoved").find("recordUndo") != std::string::npos);
+    // A reorder keeps playing what was playing, found by path rather than by
+    // the row it used to occupy.
+    CHECK(bodyOf(dock, "void PlaylistDock::onRowsMoved").find("currentPath") != std::string::npos);
+}
+
 // F-17. Every button carried an accessibleName and Qt::NoFocus at the same
 // time: named for a screen reader, unreachable by the keyboard that drives one.
 TEST_CASE("the dock is reachable from the keyboard") {
     const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
-    const std::string list = readSource("src/plugin/PlaylistListWidget.cpp");
+    const std::string list = readSource("src/plugin/PlaylistView.cpp");
 
     CHECK(dock.find("setFocusPolicy(Qt::NoFocus)") == std::string::npos);
     CHECK(dock.find("setAccessibleName") != std::string::npos);
@@ -377,7 +491,7 @@ TEST_CASE("no icon ships without being used") {
     for (const char* icon : {"plus", "minus", "chevron-up", "chevron-down", "undo", "play",
                              "pause", "stop", "skip-back", "skip-forward", "save", "folder-open",
                              "pencil", "trash", "download", "upload", "refresh", "settings",
-                             "search", "music", "volume", "volume-x"}) {
+                             "search", "music", "volume", "volume-x", "panic", "library"}) {
         CAPTURE(icon);
         const std::string file = std::string("icons/") + icon + ".svg";
         CHECK(qrc.find("<file>" + file + "</file>") != std::string::npos);
@@ -387,5 +501,5 @@ TEST_CASE("no icon ships without being used") {
     size_t entries = 0;
     for (size_t i = qrc.find("<file>"); i != std::string::npos; i = qrc.find("<file>", i + 1))
         ++entries;
-    CHECK(entries == 22);
+    CHECK(entries == 24);
 }

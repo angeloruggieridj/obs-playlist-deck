@@ -23,5 +23,7 @@
     <file>icons/undo.svg</file>
     <file>icons/volume.svg</file>
     <file>icons/volume-x.svg</file>
+    <file>icons/panic.svg</file>
+    <file>icons/library.svg</file>
   </qresource>
 </RCC>

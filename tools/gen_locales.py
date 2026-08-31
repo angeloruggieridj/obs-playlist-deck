@@ -15,6 +15,8 @@ Usage:
   * a shipped .ini differs from what the table would generate
   * a locale is missing a key another locale has
   * a key used in the C++ sources is missing from the table
+  * a key in the table is used nowhere (a string nobody can ever see, and nine
+    translations of it to maintain)
   * a translation drops a %1/%2 placeholder its English text uses
   * a file is not UTF-8, or carries a BOM
 """
@@ -86,8 +88,11 @@ def check(locales: list[str], keys: dict[str, dict[str, str]]) -> int:
                     f"English uses {sorted(wanted) or 'none'}"
                 )
 
-    for key in sorted(used_keys() - set(keys)):
+    used = used_keys()
+    for key in sorted(used - set(keys)):
         problems.append(f"key used in the sources but not translated: {key}")
+    for key in sorted(set(keys) - used):
+        problems.append(f"key translated but used nowhere: {key}")
 
     for locale in locales:
         path = LOCALE_DIR / f"{locale}.ini"
