@@ -311,13 +311,18 @@ TEST_CASE("no icon ships without being used") {
     const std::string qrc = readSource("resources/icons.qrc");
     const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
     REQUIRE_FALSE(qrc.empty());
-    for (const char* icon : {"plus", "minus", "chevron-up", "chevron-down", "x", "play", "pause",
-                             "stop", "skip-back", "skip-forward", "save", "folder-open", "pencil",
-                             "trash", "download", "upload", "refresh", "settings", "search",
-                             "music"}) {
+    for (const char* icon : {"plus", "minus", "chevron-up", "chevron-down", "undo", "play",
+                             "pause", "stop", "skip-back", "skip-forward", "save", "folder-open",
+                             "pencil", "trash", "download", "upload", "refresh", "settings",
+                             "search", "music"}) {
         CAPTURE(icon);
         const std::string file = std::string("icons/") + icon + ".svg";
         CHECK(qrc.find("<file>" + file + "</file>") != std::string::npos);
         CHECK(dock.find(":/" + file) != std::string::npos);
     }
+    // Closed the other way too: the list above is the whole .qrc.
+    size_t entries = 0;
+    for (size_t i = qrc.find("<file>"); i != std::string::npos; i = qrc.find("<file>", i + 1))
+        ++entries;
+    CHECK(entries == 20);
 }

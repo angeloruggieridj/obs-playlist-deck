@@ -508,7 +508,7 @@ void PlaylistDock::buildUi() {
     auto* downBtn = mk(":/icons/chevron-down.svg", T("Btn.Down"), T("Tip.Down"));
     auto* renameBtn = mk(":/icons/pencil.svg", T("Btn.Rename"), T("Tip.Rename"));
     auto* clrBtn = mk(":/icons/trash.svg", T("Btn.Clear"), T("Tip.Clear"));
-    undoBtn_ = mk(":/icons/x.svg", T("Btn.Undo"), T("Tip.Undo"));
+    undoBtn_ = mk(":/icons/undo.svg", T("Btn.Undo"), T("Tip.Undo"));
     for (auto* b : {addBtn, rmBtn, upBtn, downBtn, renameBtn, clrBtn, undoBtn_})
         opsRow->addWidget(b);
     opsRow->addStretch(1);
