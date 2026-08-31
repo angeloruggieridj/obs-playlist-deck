@@ -49,5 +49,13 @@ jobs:
       - name: Build and install obs-frontend-api
         run: |
           cmake --build /tmp/obs-build --target obs-frontend-api --parallel
-          cmake --install /tmp/obs-build --component Development --prefix /tmp/obs-dev
-          find /tmp/obs-dev -name '*.h' | head -20
+          # OBS's export_target() (cmake/Modules/ObsHelpers.cmake) tags every
+          # install() rule with COMPONENT obs_libraries in the 30.x tree; the
+          # "Development" component name is a 31.x+ restructuring. Installing
+          # the wrong component silently installs nothing (no error, no files).
+          cmake --install /tmp/obs-build --component obs_libraries --prefix /tmp/obs-dev
+          find /tmp/obs-dev -name '*.h' | tee /tmp/installed-headers.txt | head -20
+          # A pipe into `head` masks find's exit code under plain `sh -e`, so
+          # verify the one header that matters is actually there.
+          test -f /tmp/installed-headers.txt && grep -q 'obs-frontend-api.h' /tmp/installed-headers.txt \
+            || { echo "obs-frontend-api.h was not installed"; exit 1; }
