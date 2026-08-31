@@ -18,7 +18,7 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git cmake ninja-build pkg-config extra-cmake-modules g++ \
-            qt6-base-dev qt6-base-private-dev qt6-svg-dev \
+            qt6-base-dev qt6-base-private-dev libqt6svg6-dev \
             libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev \
             libavfilter-dev libswscale-dev libswresample-dev libx264-dev \
             libcurl4-openssl-dev libjansson-dev libmbedtls-dev \
