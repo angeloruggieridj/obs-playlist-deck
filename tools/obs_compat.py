@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -311,3 +312,79 @@ def check(root: Path = ROOT) -> list[str]:
             f"workflow OBS_VERSION is {found} but the manifest was tested against "
             f"{manifest['max_tested']}; run: python3 tools/obs_compat.py --write")
     return problems
+
+
+# Below this, the runner's FFmpeg 7 cannot build OBS, so the probe moves into an
+# ubuntu:22.04 container (FFmpeg 4.4). Raise this to FLOOR to disable the
+# container path entirely — the older probes then report obs-build failures,
+# which the range logic already treats as unverifiable rather than unsupported.
+LEGACY_BOUNDARY = (31, 0)
+
+WEEKLY_CRON = "0 7 * * 1"
+TAGS_URL = "https://api.github.com/repos/obsproject/obs-studio/tags?per_page=100"
+
+
+def env_for(candidate: str) -> str:
+    version = parse_version(candidate)
+    return "jammy" if (version[0], version[1]) < LEGACY_BOUNDARY else "native"
+
+
+def build_matrix(grid: list[str], latest_stable: str, beta: str | None,
+                 manifest: dict | None) -> list[dict]:
+    """One entry per probe, with the two gate candidates marked required.
+
+    On the first run there is no manifest and therefore no declared minimum to
+    defend, so only the newest stable gates. A minor that is in the grid but not
+    yet in the manifest is never required either: that is how a freshly
+    published OBS gets measured before it gets promised.
+    """
+    candidates = list(grid)
+    if latest_stable not in candidates:
+        candidates.append(latest_stable)
+    if beta:
+        candidates.append(beta)
+
+    required = {latest_stable}
+    if manifest:
+        required.add(f"{manifest['min_supported']}.0")
+
+    return [{"obs": candidate,
+             "env": env_for(candidate),
+             "required": candidate in required}
+            for candidate in candidates]
+
+
+def needs_full_run(event: str, schedule: str, ref: str, manifest: dict | None,
+                   latest_stable: str, beta: str | None) -> bool:
+    """The daily watch only wakes the matrix when OBS has actually moved."""
+    if event in ("workflow_dispatch", "push") and (event == "workflow_dispatch"
+                                                   or ref.startswith("refs/tags/")):
+        return True
+    if event == "schedule" and schedule == WEEKLY_CRON:
+        return True
+    if manifest is None:
+        return True
+    return (latest_stable != manifest.get("max_tested")
+            or beta != manifest.get("beta_tested"))
+
+
+def fetch_tags(token: str | None) -> list[str]:
+    """The only place this module touches the network."""
+    request = urllib.request.Request(TAGS_URL, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "obs-playlist-deck-compat",
+    })
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    tags: list[str] = []
+    url: str | None = TAGS_URL
+    while url and len(tags) < 400:
+        request.full_url = url
+        with urllib.request.urlopen(request, timeout=30) as response:
+            tags += [entry["name"] for entry in json.loads(response.read().decode("utf-8"))]
+            link = response.headers.get("Link", "")
+        url = None
+        for part in link.split(","):
+            if 'rel="next"' in part:
+                url = part[part.find("<") + 1:part.find(">")]
+    return tags

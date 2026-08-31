@@ -321,5 +321,80 @@ class WriteThenCheck(unittest.TestCase):
                 obs_compat.write(root)
 
 
+class Environment(unittest.TestCase):
+    def test_pre_31_probes_run_in_the_jammy_container(self):
+        # ubuntu-24.04 ships FFmpeg 7, which OBS 30-era code will not build against.
+        self.assertEqual(obs_compat.env_for("30.2.0"), "jammy")
+
+    def test_31_and_later_run_on_the_native_runner(self):
+        self.assertEqual(obs_compat.env_for("31.0.0"), "native")
+        self.assertEqual(obs_compat.env_for("32.2.2"), "native")
+
+
+class BuildMatrix(unittest.TestCase):
+    def test_every_grid_candidate_plus_the_newest_stable_is_probed(self):
+        matrix = obs_compat.build_matrix(GRID, "32.2.2", None, sample_manifest())
+        self.assertEqual([entry["obs"] for entry in matrix], GRID + ["32.2.2"])
+
+    def test_the_newest_stable_is_not_duplicated_when_it_is_already_x_y_0(self):
+        matrix = obs_compat.build_matrix(GRID, "32.2.0", None, sample_manifest())
+        self.assertEqual([entry["obs"] for entry in matrix].count("32.2.0"), 1)
+
+    def test_exactly_the_two_extremes_are_required(self):
+        matrix = obs_compat.build_matrix(GRID, "32.2.2", None, sample_manifest())
+        required = [entry["obs"] for entry in matrix if entry["required"]]
+        self.assertEqual(required, ["30.0.0", "32.2.2"])
+
+    def test_the_declared_minimum_is_probed_at_its_first_patch(self):
+        # The manifest stores a minor; the grid probes X.Y.0.
+        matrix = obs_compat.build_matrix(
+            GRID, "32.2.2", None, sample_manifest(min_supported="31.0"))
+        required = [entry["obs"] for entry in matrix if entry["required"]]
+        self.assertEqual(required, ["31.0.0", "32.2.2"])
+
+    def test_a_qualifying_beta_is_probed_but_never_required(self):
+        matrix = obs_compat.build_matrix(GRID, "32.2.2", "32.3.0-beta1", sample_manifest())
+        beta = [entry for entry in matrix if entry["obs"] == "32.3.0-beta1"]
+        self.assertEqual(len(beta), 1)
+        self.assertFalse(beta[0]["required"])
+
+    def test_bootstrap_requires_only_the_newest_stable(self):
+        matrix = obs_compat.build_matrix(GRID, "32.2.2", None, None)
+        required = [entry["obs"] for entry in matrix if entry["required"]]
+        self.assertEqual(required, ["32.2.2"])
+
+
+class NeedsFullRun(unittest.TestCase):
+    def test_a_tag_push_always_runs_the_full_matrix(self):
+        self.assertTrue(obs_compat.needs_full_run(
+            "push", "", "refs/tags/v1.3.2", sample_manifest(), "32.2.2", None))
+
+    def test_a_manual_dispatch_always_runs_the_full_matrix(self):
+        self.assertTrue(obs_compat.needs_full_run(
+            "workflow_dispatch", "", "refs/heads/main", sample_manifest(), "32.2.2", None))
+
+    def test_the_weekly_cron_always_runs_the_full_matrix(self):
+        self.assertTrue(obs_compat.needs_full_run(
+            "schedule", obs_compat.WEEKLY_CRON, "refs/heads/main",
+            sample_manifest(), "32.2.2", None))
+
+    def test_the_daily_watch_stays_quiet_when_obs_has_not_moved(self):
+        self.assertFalse(obs_compat.needs_full_run(
+            "schedule", "0 6 * * *", "refs/heads/main", sample_manifest(), "32.2.2", None))
+
+    def test_the_daily_watch_fires_when_obs_ships_a_stable(self):
+        self.assertTrue(obs_compat.needs_full_run(
+            "schedule", "0 6 * * *", "refs/heads/main", sample_manifest(), "32.3.0", None))
+
+    def test_the_daily_watch_fires_when_a_beta_appears(self):
+        self.assertTrue(obs_compat.needs_full_run(
+            "schedule", "0 6 * * *", "refs/heads/main",
+            sample_manifest(), "32.2.2", "32.3.0-beta1"))
+
+    def test_bootstrap_runs_the_full_matrix(self):
+        self.assertTrue(obs_compat.needs_full_run(
+            "schedule", "0 6 * * *", "refs/heads/main", None, "32.2.2", None))
+
+
 if __name__ == "__main__":
     unittest.main()
