@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/angeloruggieridj/obs-playlist-deck/security/advisories/new
+    about: Please report privately, not as a public issue. See SECURITY.md.
+  - name: Translation fix
+    url: https://github.com/angeloruggieridj/obs-playlist-deck/blob/main/CONTRIBUTING.md#translations
+    about: Edit tools/locales.json, run the generator, open a PR - it is a two-file change.

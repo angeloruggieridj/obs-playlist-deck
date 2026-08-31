@@ -10,8 +10,12 @@ on:
   schedule:
     - cron: "0 6 * * 1" # weekly (Mon 06:00 UTC) — exercises the compat matrix
 
+# Least privilege by default: only the release job needs to write to the
+# repository, and it asks for that itself. A build job that is compromised (or
+# an action whose tag is repointed) otherwise inherits push access it never
+# needed.
 permissions:
-  contents: write
+  contents: read
 
 env:
   OBS_VERSION: "32.1.2"
@@ -27,6 +31,15 @@ jobs:
       - run: cmake -B build -S . -G Ninja -DBUILD_PLUGIN=OFF -DBUILD_TESTS=ON
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
+      # The ten locale files are generated from tools/locales.json: this fails
+      # if they were edited by hand, if a key is missing from a language, or if
+      # a translation dropped a %1 placeholder.
+      - name: Locales are in sync
+        run: python3 tools/gen_locales.py --check
+      # The plugin, the Stream Deck manifest and the CHANGELOG all name a
+      # version; a release is only coherent if they name the same one.
+      - name: Versions agree
+        run: python3 tools/check_version.py
 
   linux:
     name: Linux x86_64
@@ -255,6 +268,10 @@ jobs:
         run: DESTDIR="${{ github.workspace }}/release" cmake --install build
       - name: Package .plugin (universal, @rpath Qt)
         run: |
+          # The bundle version is read from CMakeLists rather than typed in:
+          # it was left at an old release for two versions running.
+          version="$(sed -n 's/.*project(obs-playlist-deck VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+          [ -n "$version" ] || { echo "could not read the project version"; exit 1; }
           bundle="macos-package/obs-playlist-deck.plugin"
           mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 
@@ -282,8 +299,8 @@ jobs:
             <key>CFBundleIdentifier</key><string>com.angeloruggieridj.obs-playlist-deck</string>
             <key>CFBundleName</key><string>Playlist Deck</string>
             <key>CFBundlePackageType</key><string>BNDL</string>
-            <key>CFBundleShortVersionString</key><string>1.2.6</string>
-            <key>CFBundleVersion</key><string>1.2.6</string>
+            <key>CFBundleShortVersionString</key><string>${version}</string>
+            <key>CFBundleVersion</key><string>${version}</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
           </dict>
           </plist>
