@@ -1,3 +1,7 @@
+// Source-inspection test: it reads the plugin sources as text. Binding a media
+// source needs a scene collection and a running OBS, so the decisions that keep
+// the dock from writing over a path the user configured are pinned here instead.
+// See CONTRIBUTING.md for when to replace one of these with a real unit test.
 #include "doctest/doctest.h"
 
 #include <fstream>
@@ -50,11 +54,11 @@ TEST_CASE("a programmatic refresh does not overwrite the configured source") {
 
     const std::string changed = bodyOf(dock, "void PlaylistDock::onSourceChanged(int)");
     REQUIRE_FALSE(changed.empty());
-    // saveSettings()/pendingSource_ are updated only for a deliberate user pick.
+    // The remembered source is updated only for a deliberate user pick.
     const auto guard = changed.find("if (!refreshing_)");
     REQUIRE(guard != std::string::npos);
     CHECK(changed.find("saveSettings();", guard) != std::string::npos);
-    CHECK(changed.find("pendingSource_ = name;", guard) != std::string::npos);
+    CHECK(changed.find("settings_.source = name;", guard) != std::string::npos);
 
     // refreshSources() must set and clear the guard around its repopulation.
     const std::string refresh = bodyOf(dock, "void PlaylistDock::refreshSources()");
@@ -63,10 +67,11 @@ TEST_CASE("a programmatic refresh does not overwrite the configured source") {
 
     // The persisted name is the remembered choice, not the combo's label, which
     // reads as the placeholder whenever the source is absent from the collection.
-    const std::string save = bodyOf(dock, "void PlaylistDock::saveSettings() const");
+    const std::string store = readSource("src/plugin/SettingsStore.cpp");
+    const std::string save = bodyOf(store, "bool SettingsStore::saveSettings");
     REQUIRE_FALSE(save.empty());
-    CHECK(save.find("o[\"source\"] = pendingSource_;") != std::string::npos);
-    CHECK(save.find("currentText()") == std::string::npos);
+    CHECK(save.find("o[\"source\"] = settings.source;") != std::string::npos);
+    CHECK(dock.find("currentText()") == std::string::npos);
 }
 
 TEST_CASE("a user-configured media path is never cleared") {
@@ -92,7 +97,7 @@ TEST_CASE("the collection swap remembers the bound source") {
     const std::string body = bodyOf(readSource("src/plugin/PlaylistDock.cpp"),
                                     "void PlaylistDock::releaseSource()");
     REQUIRE_FALSE(body.empty());
-    CHECK(body.find("pendingSource_ = QString::fromStdString(controller_.boundName())") !=
+    CHECK(body.find("settings_.source = QString::fromStdString(controller_.boundName())") !=
           std::string::npos);
     CHECK(body.find("controller_.unbind();") != std::string::npos);
 }
