@@ -220,11 +220,29 @@ def render_readme_section(manifest: dict) -> str:
     return "\n".join(lines)
 
 
-def replace_between_markers(text: str, body: str) -> str:
+def _find_markers(text: str) -> tuple[int, int]:
     start, end = text.find(README_START), text.find(README_END)
     if start == -1 or end == -1 or end < start:
         raise RangeError(f"README is missing the {README_START} / {README_END} markers")
+    return start, end
+
+
+def replace_between_markers(text: str, body: str) -> str:
+    start, end = _find_markers(text)
     return text[:start] + README_START + "\n" + body + "\n" + text[end:]
+
+
+def _marker_region(text: str) -> str:
+    """The text strictly between the markers, markers excluded.
+
+    check() must compare against exactly this, not against the file as a
+    whole: the rendered block appearing anywhere in the README is not the
+    same claim as it being what the markers actually bracket, and a stale
+    region hiding behind a correct-looking copy elsewhere is the one thing
+    this check must never wave through.
+    """
+    start, end = _find_markers(text)
+    return text[start + len(README_START):end].strip("\n")
 
 
 def workflow_obs_version(text: str) -> str:
@@ -235,7 +253,14 @@ def workflow_obs_version(text: str) -> str:
 
 
 def set_workflow_obs_version(text: str, version: str) -> str:
-    return _OBS_VERSION.sub(lambda m: m.group(1) + version + m.group(3), text, count=1)
+    updated, count = _OBS_VERSION.subn(lambda m: m.group(1) + version + m.group(3), text, count=1)
+    if count == 0:
+        # A silent no-op here is worse than the drift this command exists to
+        # close: write() would return normally with the README moved and the
+        # workflow left behind, exactly the divergence --check is meant to
+        # catch — produced by the fixing command itself.
+        raise RangeError("no OBS_VERSION in the workflow")
+    return updated
 
 
 def write(root: Path = ROOT) -> None:
@@ -247,7 +272,8 @@ def write(root: Path = ROOT) -> None:
     """
     manifest = load_manifest(root / "obs-compat.json")
     if manifest is None:
-        raise RangeError("no obs-compat.json to render from; run --report first")
+        raise RangeError(
+            "no obs-compat.json to render from; run: python3 tools/obs_compat.py --report")
 
     readme = root / "README.md"
     readme.write_text(
@@ -265,14 +291,19 @@ def check(root: Path = ROOT) -> list[str]:
     """Offline consistency: README, manifest and OBS_VERSION must agree."""
     manifest = load_manifest(root / "obs-compat.json")
     if manifest is None:
-        return ["obs-compat.json is missing; run tools/obs_compat.py --report"]
+        return ["obs-compat.json is missing; run: python3 tools/obs_compat.py --report"]
 
     problems = []
     expected = render_readme_section(manifest)
-    if expected not in (root / "README.md").read_text(encoding="utf-8"):
-        problems.append(
-            "README compatibility table does not match obs-compat.json; "
-            "run: python3 tools/obs_compat.py --write")
+    try:
+        region = _marker_region((root / "README.md").read_text(encoding="utf-8"))
+    except RangeError as exc:
+        problems.append(f"{exc}; run: python3 tools/obs_compat.py --write")
+    else:
+        if region != expected:
+            problems.append(
+                "README compatibility table does not match obs-compat.json; "
+                "run: python3 tools/obs_compat.py --write")
 
     found = workflow_obs_version((root / WORKFLOW_REL).read_text(encoding="utf-8"))
     if found != manifest["max_tested"]:

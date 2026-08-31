@@ -296,6 +296,30 @@ class WriteThenCheck(unittest.TestCase):
             (root / "README.md").write_text("nothing", encoding="utf-8")
             self.assertTrue(any("obs-compat.json" in problem for problem in obs_compat.check(root)))
 
+    def test_check_is_not_fooled_by_a_correct_block_sitting_outside_the_markers(self):
+        # A correct copy anywhere in the file is not the same claim as the
+        # marker region itself being correct; only the latter is what --write
+        # actually produces, and only the latter is what --check must trust.
+        with tempfile.TemporaryDirectory() as name:
+            root = self._repo(Path(name))
+            correct = obs_compat.render_readme_section(sample_manifest())
+            readme = root / "README.md"
+            readme.write_text(readme.read_text(encoding="utf-8") + "\n" + correct + "\n",
+                              encoding="utf-8")
+            problems = obs_compat.check(root)
+            self.assertTrue(any("README" in problem for problem in problems))
+
+    def test_write_raises_rather_than_leave_the_workflow_behind(self):
+        # Single-quoted is valid YAML but not what _OBS_VERSION matches. If
+        # write() stayed silent here it would move the README and leave
+        # OBS_VERSION exactly where the whole command exists to stop it.
+        with tempfile.TemporaryDirectory() as name:
+            root = self._repo(Path(name))
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                "env:\n  OBS_VERSION: '32.2.2'\n", encoding="utf-8")
+            with self.assertRaises(obs_compat.RangeError):
+                obs_compat.write(root)
+
 
 if __name__ == "__main__":
     unittest.main()
