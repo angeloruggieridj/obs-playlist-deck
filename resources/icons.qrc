@@ -21,5 +21,7 @@
     <file>icons/search.svg</file>
     <file>icons/music.svg</file>
     <file>icons/undo.svg</file>
+    <file>icons/volume.svg</file>
+    <file>icons/volume-x.svg</file>
   </qresource>
 </RCC>

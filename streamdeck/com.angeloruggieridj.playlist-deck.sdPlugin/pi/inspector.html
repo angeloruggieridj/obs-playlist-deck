@@ -35,6 +35,17 @@
       }
       .field { margin-bottom: 8px; }
       .field label { display: block; margin-bottom: 3px; color: var(--muted); }
+      .field select {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--ink);
+        padding: 5px 6px;
+        border-radius: 4px;
+      }
+      .field select:focus { outline: none; border-color: var(--accent); }
+      #pickerStatus { font-size: 8.5pt; color: var(--muted); }
       .field input {
         width: 100%;
         box-sizing: border-box;
@@ -65,10 +76,22 @@
     <section id="itemBox" style="display: none">
       <h4>Item</h4>
       <div class="field">
+        <label for="picker">Clip</label>
+        <select id="picker"><option value="">- load the playlist from OBS -</option></select>
+      </div>
+      <div class="row">
+        <button id="loadItems" type="button">Load playlist</button>
+        <span id="pickerStatus"></span>
+      </div>
+      <div class="field" style="margin-top: 8px">
         <label for="index">Index (0-based)</label>
         <input id="index" type="number" min="0" value="0" autocomplete="off" />
       </div>
-      <div class="hint">Position in the playlist. The deck shows the same numbering starting at 1.</div>
+      <div class="hint">
+        Pick the clip by name and the index follows. Nobody knows what index 7 is at showtime,
+        which is why the list is here; the number stays editable for a playlist that is not
+        loaded yet.
+      </div>
     </section>
 
     <section>
@@ -164,86 +187,124 @@
         sd.send(JSON.stringify({ event: "setSettings", context: uuid, payload: settings }));
       }
 
+      // One vendor request over a throwaway connection, used by both the
+      // connection test and the clip picker. Resolves with the plugin's
+      // response, or rejects with something an operator can act on.
+      function obsRequest(requestType, requestData) {
+        const host = $("host").value.trim() || "127.0.0.1";
+        const port = parseInt($("port").value, 10) || 4455;
+        const password = $("password").value;
+        return new Promise((resolve, reject) => {
+          let ws;
+          try {
+            ws = new WebSocket(`ws://${host}:${port}`);
+          } catch (e) {
+            reject(new Error("Cannot reach " + host + ":" + port));
+            return;
+          }
+          let settled = false;
+          const finish = (fn, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            try {
+              ws.close();
+            } catch (e) {}
+            fn(value);
+          };
+          const timeout = setTimeout(
+            () => finish(reject, new Error("No answer from OBS")),
+            5000
+          );
+          ws.onerror = () => finish(reject, new Error("Cannot reach " + host + ":" + port));
+          ws.onclose = () => finish(reject, new Error("Rejected - check the password"));
+          ws.onmessage = async (ev) => {
+            let msg;
+            try {
+              msg = JSON.parse(ev.data);
+            } catch (e) {
+              return;
+            }
+            if (msg.op === 0) {
+              const identify = { rpcVersion: 1 };
+              const auth = msg.d && msg.d.authentication;
+              if (auth) {
+                const secret = await sha256b64((password || "") + auth.salt);
+                identify.authentication = await sha256b64(secret + auth.challenge);
+              }
+              ws.send(JSON.stringify({ op: 1, d: identify }));
+            } else if (msg.op === 2) {
+              ws.send(
+                JSON.stringify({
+                  op: 6,
+                  d: {
+                    requestType: "CallVendorRequest",
+                    requestId: "pi-" + requestType,
+                    requestData: {
+                      vendorName: "obs-playlist-deck",
+                      requestType,
+                      requestData: requestData || {},
+                    },
+                  },
+                })
+              );
+            } else if (msg.op === 7) {
+              const d = msg.d || {};
+              const ok = d.requestStatus && d.requestStatus.result;
+              const data = (d.responseData && d.responseData.responseData) || null;
+              if (ok && data && data.ok) finish(resolve, data);
+              else finish(reject, new Error("OBS answered, Playlist Deck plugin not found"));
+            }
+          };
+        });
+      }
+
       // Most "it does not work" reports are a wrong port or password. Checking
       // it here, where they were typed, is one click instead of a support round
-      // trip.
+      // trip - and it tells apart a bad password from a missing OBS plugin.
       function testConnection() {
         const status = $("status");
         status.className = "";
         status.textContent = "Connecting…";
-        const host = $("host").value.trim() || "127.0.0.1";
-        const port = parseInt($("port").value, 10) || 4455;
-        const password = $("password").value;
-        let ws;
-        try {
-          ws = new WebSocket(`ws://${host}:${port}`);
-        } catch (e) {
-          status.className = "bad";
-          status.textContent = "Cannot reach " + host + ":" + port;
-          return;
-        }
-        const done = (ok, text) => {
-          status.className = ok ? "ok" : "bad";
-          status.textContent = text;
-          try {
-            ws.close();
-          } catch (e) {}
-        };
-        const timeout = setTimeout(() => done(false, "No answer from OBS"), 5000);
-        ws.onerror = () => {
-          clearTimeout(timeout);
-          done(false, "Cannot reach " + host + ":" + port);
-        };
-        ws.onmessage = async (ev) => {
-          let msg;
-          try {
-            msg = JSON.parse(ev.data);
-          } catch (e) {
-            return;
+        obsRequest("GetStatus", {}).then(
+          (data) => {
+            status.className = "ok";
+            status.textContent = "Connected · " + (data.count || 0) + " items";
+          },
+          (err) => {
+            status.className = "bad";
+            status.textContent = err.message;
           }
-          if (msg.op === 0) {
-            const identify = { rpcVersion: 1 };
-            const auth = msg.d && msg.d.authentication;
-            if (auth) {
-              const secret = await sha256b64((password || "") + auth.salt);
-              identify.authentication = await sha256b64(secret + auth.challenge);
+        );
+      }
+
+      // An index is meaningless at showtime; the titles are not.
+      function loadItems() {
+        const status = $("pickerStatus");
+        status.textContent = "Loading…";
+        obsRequest("GetItems", {}).then(
+          (data) => {
+            const picker = $("picker");
+            const items = data.items || [];
+            const wanted = parseInt($("index").value, 10) || 0;
+            picker.innerHTML = "";
+            if (items.length === 0) {
+              picker.appendChild(new Option("- the playlist is empty -", ""));
+              status.textContent = "";
+              return;
             }
-            ws.send(JSON.stringify({ op: 1, d: identify }));
-          } else if (msg.op === 2) {
-            // Connected and authenticated: now ask the plugin itself, so a
-            // missing OBS plugin is distinguished from a bad password.
-            ws.send(
-              JSON.stringify({
-                op: 6,
-                d: {
-                  requestType: "CallVendorRequest",
-                  requestId: "pi-test",
-                  requestData: {
-                    vendorName: "obs-playlist-deck",
-                    requestType: "GetStatus",
-                    requestData: {},
-                  },
-                },
-              })
-            );
-          } else if (msg.op === 7) {
-            clearTimeout(timeout);
-            const d = msg.d || {};
-            const okRequest = d.requestStatus && d.requestStatus.result;
-            const data = (d.responseData && d.responseData.responseData) || null;
-            if (okRequest && data && data.ok) {
-              done(true, "Connected · " + (data.count || 0) + " items");
-            } else {
-              done(false, "OBS answered, Playlist Deck plugin not found");
-            }
+            items.forEach((item) => {
+              const label = item.index + 1 + ". " + (item.title || item.path || "");
+              picker.appendChild(new Option(label, String(item.index)));
+            });
+            picker.value = String(wanted);
+            if (picker.value !== String(wanted)) picker.selectedIndex = 0;
+            status.textContent = items.length + " clips";
+          },
+          (err) => {
+            status.textContent = err.message;
           }
-        };
-        ws.onclose = () => {
-          if (status.textContent === "Connecting…") {
-            clearTimeout(timeout);
-            done(false, "Rejected — check the password");
-          }
-        };
+        );
       }
 
       async function sha256b64(str) {
@@ -262,6 +323,13 @@
         $("index").addEventListener("change", saveItem);
         $("index").addEventListener("input", debounce(saveItem, 300));
         $("test").addEventListener("click", testConnection);
+        $("loadItems").addEventListener("click", loadItems);
+        $("picker").addEventListener("change", () => {
+          const value = $("picker").value;
+          if (value === "") return;
+          $("index").value = value;
+          saveItem();
+        });
       });
     </script>
   </body>

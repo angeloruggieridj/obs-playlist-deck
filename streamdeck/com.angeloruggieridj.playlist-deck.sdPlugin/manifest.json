@@ -1,6 +1,6 @@
 {
   "SDKVersion": 2,
-  "Version": "1.3.0",
+  "Version": "1.3.1",
   "Author": "Angelo Ruggieri",
   "Name": "Playlist Deck",
   "Description": "Control the OBS Playlist Deck plugin (next, previous, play/pause, stop, play item) over obs-websocket.",
@@ -10,10 +10,18 @@
   "URL": "https://github.com/angeloruggieridj/obs-playlist-deck",
   "CodePath": "app.html",
   "PropertyInspectorPath": "pi/inspector.html",
-  "Software": { "MinimumVersion": "6.0" },
+  "Software": {
+    "MinimumVersion": "6.0"
+  },
   "OS": [
-    { "Platform": "mac", "MinimumVersion": "10.15" },
-    { "Platform": "windows", "MinimumVersion": "10" }
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.15"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
   ],
   "Actions": [
     {
@@ -21,35 +29,72 @@
       "Name": "Next",
       "Tooltip": "Play the next item",
       "Icon": "icons/next",
-      "States": [{ "Image": "icons/next", "TitleAlignment": "bottom" }]
+      "States": [
+        {
+          "Image": "icons/next",
+          "TitleAlignment": "bottom"
+        }
+      ]
     },
     {
       "UUID": "com.angeloruggieridj.playlist-deck.previous",
       "Name": "Previous",
       "Tooltip": "Play the previous item",
       "Icon": "icons/prev",
-      "States": [{ "Image": "icons/prev", "TitleAlignment": "bottom" }]
+      "States": [
+        {
+          "Image": "icons/prev",
+          "TitleAlignment": "bottom"
+        }
+      ]
     },
     {
       "UUID": "com.angeloruggieridj.playlist-deck.playpause",
       "Name": "Play / Pause",
       "Tooltip": "Toggle play/pause of the bound source",
       "Icon": "icons/playpause",
-      "States": [{ "Image": "icons/playpause", "TitleAlignment": "bottom" }]
+      "States": [
+        {
+          "Image": "icons/playpause",
+          "TitleAlignment": "bottom"
+        }
+      ]
     },
     {
       "UUID": "com.angeloruggieridj.playlist-deck.stop",
       "Name": "Stop",
       "Tooltip": "Stop playback",
       "Icon": "icons/stop",
-      "States": [{ "Image": "icons/stop", "TitleAlignment": "bottom" }]
+      "States": [
+        {
+          "Image": "icons/stop",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
+      "UUID": "com.angeloruggieridj.playlist-deck.mute",
+      "Name": "Mute / Unmute",
+      "Tooltip": "Mute or unmute the bound source",
+      "Icon": "icons/mute",
+      "States": [
+        {
+          "Image": "icons/mute",
+          "TitleAlignment": "bottom"
+        }
+      ]
     },
     {
       "UUID": "com.angeloruggieridj.playlist-deck.playitem",
       "Name": "Play Item",
       "Tooltip": "Play a specific playlist item by index",
       "Icon": "icons/playitem",
-      "States": [{ "Image": "icons/playitem", "TitleAlignment": "bottom" }]
+      "States": [
+        {
+          "Image": "icons/playitem",
+          "TitleAlignment": "bottom"
+        }
+      ]
     }
   ]
 }
