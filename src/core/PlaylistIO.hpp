@@ -2,6 +2,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "Library.hpp"
 #include "Playlist.hpp"
 
 namespace pld::io {
@@ -27,6 +28,13 @@ ParseResult fromJson(const std::string& text, std::string& nameOut,
 std::string toM3u(const std::vector<PlaylistItem>& items, const std::string& baseDir = "",
                   bool relativePaths = false);
 std::vector<PlaylistItem> parseM3u(const std::string& text, const std::string& baseDir = "");
+
+// The whole library in one file: every playlist with its items and its
+// properties, plus which one is active. Version 2 of the on-disk schema — a
+// version 1 file holds a single playlist and is migrated on read.
+std::string toLibraryJson(const std::vector<PlaylistEntry>& entries, int active);
+bool fromLibraryJson(const std::string& text, std::vector<PlaylistEntry>& entriesOut,
+                     int& activeOut);
 
 // Comma-separated title,path,duration for reporting/handover. Export only —
 // there is no CSV reader, on purpose: it is a report format, not a playlist.

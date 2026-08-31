@@ -17,6 +17,13 @@ public:
     bool isBound = true;
     bool acceptsFiles = true;
     bool onAir = true;
+    // A real media source reports that it started playing shortly after it is
+    // handed a file. Modelling that is what keeps the tests honest: the guard in
+    // mediaEnded() depends on it, and a fake that never started anything would
+    // describe a source that does not exist. Tests about the guard itself turn
+    // it off.
+    bool autoStart = true;
+    PlaybackEngine* engine = nullptr;
 
     std::vector<std::string> played;
     std::vector<std::string> staged;
@@ -26,15 +33,21 @@ public:
     bool playFile(const std::string& path) override {
         if (!acceptsFiles) return false;
         played.push_back(path);
+        reportStarted();
         return true;
     }
     bool stageFile(const std::string& path) override {
         if (!acceptsFiles) return false;
         staged.push_back(path);
+        reportStarted();
         return true;
     }
     void stop() override { ++stops; }
     bool inProgram() const override { return onAir; }
+
+    void reportStarted() {
+        if (autoStart && engine) engine->mediaStarted();
+    }
 
     std::string lastPlayed() const { return played.empty() ? "" : played.back(); }
     std::string lastStaged() const { return staged.empty() ? "" : staged.back(); }
@@ -47,6 +60,7 @@ struct Fixture {
     PlaybackEngine engine{playlist, transport, rng};
 
     explicit Fixture(int count = 3) {
+        transport.engine = &engine;
         for (int i = 0; i < count; ++i) {
             const std::string name = "clip" + std::to_string(i);
             playlist.add(PlaylistItem{"/media/" + name + ".mp4", name, -1});
@@ -293,4 +307,80 @@ TEST_CASE("changing mode drops a shuffle bag drawn for the previous one") {
     const int current = f.playlist.currentIndex();
     const auto result = f.engine.mediaEnded();
     CHECK(result.index == current + 1);
+}
+
+// Regression, 1.3.1. Handing the source a new file makes it report that the
+// *outgoing* media ended, on top of the end that started the sequence. In
+// "Load next (paused)" that second end arrived when the deck was already off
+// air, so it was acted on at once: the playlist advanced by two, item 1 was
+// replaced by item 2 before anyone saw it, and the list highlighted the wrong
+// clip. The exact sequence the user hit:
+TEST_CASE("a spurious end from the outgoing clip does not advance the playlist twice") {
+    Fixture f(4);
+    f.transport.autoStart = false; // the handshake is what this case is about
+    f.engine.setMode(EndMode::LoadNext);
+    f.engine.play(0);
+    f.engine.mediaStarted(); // clip 0 is really playing
+    f.transport.onAir = true;
+
+    // Clip 0 ends while the source is on air: item 1 is queued, nothing loaded.
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::StagePending);
+    CHECK(f.engine.pendingStageRow() == 1);
+
+    // Program -> Preview: item 1 is loaded, paused.
+    f.transport.onAir = false;
+    const auto staged = f.engine.programLayoutChanged();
+    CHECK(staged.outcome == PlaybackOutcome::Staged);
+    CHECK(staged.index == 1);
+    CHECK(f.transport.lastStaged() == "/media/clip1.mp4");
+
+    // The source now reports that the clip it was told to drop has ended. It is
+    // not clip 1 - clip 1 has not started yet - so nothing happens.
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
+    CHECK(f.playlist.currentIndex() == 1);
+    CHECK(f.transport.staged.size() == 1);
+
+    // And once clip 1 really plays, its own end advances by exactly one.
+    f.engine.mediaStarted();
+    f.transport.onAir = true;
+    const auto next = f.engine.mediaEnded();
+    CHECK(next.outcome == PlaybackOutcome::StagePending);
+    CHECK(next.index == 2);
+}
+
+TEST_CASE("the same guard protects a plain auto-advance") {
+    Fixture f(4);
+    f.transport.autoStart = false;
+    f.engine.setMode(EndMode::PlayNext);
+    f.engine.play(0);
+    f.engine.mediaStarted();
+
+    CHECK(f.engine.mediaEnded().index == 1); // clip 0 ended: play clip 1
+    // The reload makes the source report the outgoing clip's end.
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
+    CHECK(f.playlist.currentIndex() == 1);
+    CHECK(f.transport.played.size() == 2);
+
+    f.engine.mediaStarted();
+    CHECK(f.engine.mediaEnded().index == 2); // and the real end still advances
+}
+
+TEST_CASE("a source that never reports a start costs one advance, not the deck") {
+    Fixture f(4);
+    f.transport.autoStart = false;
+    f.engine.setMode(EndMode::PlayNext);
+    f.engine.play(0);
+    // No mediaStarted() at all: the first end is treated as the outgoing clip's.
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
+    // The next one is honoured, so auto-advance cannot wedge for good.
+    CHECK(f.engine.mediaEnded().index == 1);
+}
+
+TEST_CASE("an explicit request is never blocked by the guard") {
+    Fixture f(4);
+    f.transport.autoStart = false;
+    f.engine.play(0); // no start reported
+    CHECK(f.engine.next().index == 1);
+    CHECK(f.engine.prev().index == 0);
+    CHECK(f.engine.play(3).index == 3);
 }

@@ -60,6 +60,13 @@ public:
     PlaybackResult next();
     PlaybackResult prev();
 
+    // The bound source reported that a clip started playing.
+    //
+    // It is not only informational: an end that arrives before the clip we just
+    // handed the source has started does not belong to that clip, and acting on
+    // it advances the playlist twice. See mediaEnded().
+    void mediaStarted() { awaitingStart_ = false; }
+
     // The bound source reported that the clip finished.
     PlaybackResult mediaEnded();
 
@@ -96,6 +103,9 @@ private:
     ShuffleQueue shuffle_;
     bool pendingStage_ = false;
     int pendingStageRow_ = -1;
+    // True from the moment a file is handed to the source until that source
+    // says it started playing it.
+    bool awaitingStart_ = false;
 };
 
 } // namespace pld
