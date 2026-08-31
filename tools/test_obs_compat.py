@@ -10,6 +10,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import obs_compat
 
@@ -357,6 +358,7 @@ class BuildMatrix(unittest.TestCase):
         beta = [entry for entry in matrix if entry["obs"] == "32.3.0-beta1"]
         self.assertEqual(len(beta), 1)
         self.assertFalse(beta[0]["required"])
+        self.assertEqual(beta[0]["env"], "native")
 
     def test_bootstrap_requires_only_the_newest_stable(self):
         matrix = obs_compat.build_matrix(GRID, "32.2.2", None, None)
@@ -368,6 +370,14 @@ class NeedsFullRun(unittest.TestCase):
     def test_a_tag_push_always_runs_the_full_matrix(self):
         self.assertTrue(obs_compat.needs_full_run(
             "push", "", "refs/tags/v1.3.2", sample_manifest(), "32.2.2", None))
+
+    def test_a_branch_push_with_an_unchanged_manifest_does_not_run_the_full_matrix(self):
+        # This is what the watcher design rests on. If the push/tag check is
+        # ever "simplified" to fire on any push rather than only a tag push,
+        # this test is what catches it — otherwise every push to main would
+        # start building OBS from source.
+        self.assertFalse(obs_compat.needs_full_run(
+            "push", "", "refs/heads/main", sample_manifest(), "32.2.2", None))
 
     def test_a_manual_dispatch_always_runs_the_full_matrix(self):
         self.assertTrue(obs_compat.needs_full_run(
@@ -394,6 +404,81 @@ class NeedsFullRun(unittest.TestCase):
     def test_bootstrap_runs_the_full_matrix(self):
         self.assertTrue(obs_compat.needs_full_run(
             "schedule", "0 6 * * *", "refs/heads/main", None, "32.2.2", None))
+
+
+class _FakePage:
+    """Stands in for the `urllib.request.urlopen` context manager's response.
+
+    `link` is the raw `Link` header value fetch_tags() parses for pagination;
+    an empty string reproduces a response with no Link header at all.
+    """
+    def __init__(self, tags: list[str], link: str = ""):
+        self._body = json.dumps([{"name": tag} for tag in tags]).encode("utf-8")
+        self._link = link
+
+    def read(self) -> bytes:
+        return self._body
+
+    @property
+    def headers(self) -> dict:
+        return {"Link": self._link} if self._link else {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def _fake_urlopen(pages: list["_FakePage"]):
+    """Serves `pages` in order, one per fetch_tags() request, ignoring the URL."""
+    remaining = iter(pages)
+
+    def _urlopen(request, timeout=30):
+        return next(remaining)
+
+    return _urlopen
+
+
+def _next_link(url: str) -> str:
+    return f'<{url}>; rel="next"'
+
+
+class FetchTagsPagination(unittest.TestCase):
+    def test_hitting_the_cap_raises_instead_of_truncating(self):
+        # Four pages of 100 land exactly on TAG_CAP (400) while a next link is
+        # still present — a silent truncation here would ship a short tag
+        # list and, downstream, a wrong grid and a wrong README.
+        pages = [
+            _FakePage([f"30.{i}.0" for i in range(100)], _next_link("https://x/2")),
+            _FakePage([f"31.{i}.0" for i in range(100)], _next_link("https://x/3")),
+            _FakePage([f"32.{i}.0" for i in range(100)], _next_link("https://x/4")),
+            _FakePage([f"33.{i}.0" for i in range(100)], _next_link("https://x/5")),
+        ]
+        with mock.patch.object(obs_compat.urllib.request, "urlopen", _fake_urlopen(pages)):
+            with self.assertRaises(obs_compat.RangeError) as ctx:
+                obs_compat.fetch_tags(None)
+        self.assertIn("cap", str(ctx.exception))
+
+    def test_a_response_under_the_cap_never_raises(self):
+        pages = [_FakePage(["30.0.0", "30.1.0"])]
+        with mock.patch.object(obs_compat.urllib.request, "urlopen", _fake_urlopen(pages)):
+            tags = obs_compat.fetch_tags(None)
+        self.assertEqual(tags, ["30.0.0", "30.1.0"])
+
+    def test_a_missing_link_header_terminates_pagination_cleanly(self):
+        pages = [_FakePage(["30.0.0", "30.1.0"], link="")]
+        with mock.patch.object(obs_compat.urllib.request, "urlopen", _fake_urlopen(pages)):
+            tags = obs_compat.fetch_tags(None)
+        self.assertEqual(tags, ["30.0.0", "30.1.0"])
+
+    def test_a_malformed_link_header_terminates_pagination_cleanly(self):
+        # A Link header present but with no rel="next" part (e.g. only
+        # rel="prev") must read the same as no Link header at all.
+        pages = [_FakePage(["30.0.0"], link='<https://x/0>; rel="prev"')]
+        with mock.patch.object(obs_compat.urllib.request, "urlopen", _fake_urlopen(pages)):
+            tags = obs_compat.fetch_tags(None)
+        self.assertEqual(tags, ["30.0.0"])
 
 
 if __name__ == "__main__":

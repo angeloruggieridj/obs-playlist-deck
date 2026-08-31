@@ -357,8 +357,7 @@ def build_matrix(grid: list[str], latest_stable: str, beta: str | None,
 def needs_full_run(event: str, schedule: str, ref: str, manifest: dict | None,
                    latest_stable: str, beta: str | None) -> bool:
     """The daily watch only wakes the matrix when OBS has actually moved."""
-    if event in ("workflow_dispatch", "push") and (event == "workflow_dispatch"
-                                                   or ref.startswith("refs/tags/")):
+    if event == "workflow_dispatch" or (event == "push" and ref.startswith("refs/tags/")):
         return True
     if event == "schedule" and schedule == WEEKLY_CRON:
         return True
@@ -366,6 +365,13 @@ def needs_full_run(event: str, schedule: str, ref: str, manifest: dict | None,
         return True
     return (latest_stable != manifest.get("max_tested")
             or beta != manifest.get("beta_tested"))
+
+
+# A runaway stop, not an expected ceiling: OBS is at ~250 tags today. Hitting
+# it means the API paginated far more than any real tag list would, and
+# returning a silently short list from here would produce a wrong grid, a
+# wrong newest-stable, and a wrong README with nothing anywhere to say why.
+TAG_CAP = 400
 
 
 def fetch_tags(token: str | None) -> list[str]:
@@ -378,7 +384,7 @@ def fetch_tags(token: str | None) -> list[str]:
         request.add_header("Authorization", f"Bearer {token}")
     tags: list[str] = []
     url: str | None = TAGS_URL
-    while url and len(tags) < 400:
+    while url:
         request.full_url = url
         with urllib.request.urlopen(request, timeout=30) as response:
             tags += [entry["name"] for entry in json.loads(response.read().decode("utf-8"))]
@@ -387,4 +393,8 @@ def fetch_tags(token: str | None) -> list[str]:
         for part in link.split(","):
             if 'rel="next"' in part:
                 url = part[part.find("<") + 1:part.find(">")]
+        if url and len(tags) >= TAG_CAP:
+            raise RangeError(
+                f"the OBS tag list exceeded the {TAG_CAP}-tag cap in fetch_tags(); "
+                "raise TAG_CAP")
     return tags
