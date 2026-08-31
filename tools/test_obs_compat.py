@@ -92,5 +92,66 @@ class Bounds(unittest.TestCase):
         self.assertEqual(obs_compat.qualifying_beta(tags), "32.3.0-beta1")
 
 
+def ok(env: str = "native") -> dict:
+    return {"status": "ok", "phase": None, "env": env}
+
+
+def incompatible(env: str = "native") -> dict:
+    return {"status": "fail", "phase": "plugin-build", "env": env}
+
+
+def unbuildable(env: str = "jammy") -> dict:
+    return {"status": "fail", "phase": "obs-build", "env": env}
+
+
+GRID = ["30.0.0", "30.1.0", "30.2.0", "31.0.0", "31.1.0", "32.0.0", "32.1.0", "32.2.0"]
+
+
+class DeriveRange(unittest.TestCase):
+    def test_all_green_declares_the_floor(self):
+        results = {version: ok() for version in GRID}
+        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        self.assertEqual(derived["min_supported"], "30.0")
+        self.assertEqual(derived["gaps"], [])
+        self.assertEqual(derived["unverifiable"], [])
+
+    def test_a_failing_middle_minor_raises_the_minimum(self):
+        # 30.0 compiling does not make "30.0+" true when 30.1 does not.
+        results = {version: ok() for version in GRID}
+        results["30.1.0"] = incompatible()
+        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        self.assertEqual(derived["min_supported"], "30.2")
+        self.assertEqual(derived["gaps"], ["30.1"])
+
+    def test_an_unbuildable_sdk_is_unverifiable_not_incompatible(self):
+        results = {version: ok() for version in GRID}
+        results["30.0.0"] = unbuildable()
+        results["30.1.0"] = unbuildable()
+        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        self.assertEqual(derived["min_supported"], "30.2")
+        self.assertEqual(derived["unverifiable"], ["30.0", "30.1"])
+        self.assertEqual(derived["gaps"], [])
+
+    def test_a_missing_result_is_unverifiable_too(self):
+        results = {version: ok() for version in GRID if version != "30.0.0"}
+        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        self.assertEqual(derived["min_supported"], "30.1")
+        self.assertEqual(derived["unverifiable"], ["30.0"])
+
+    def test_the_block_must_reach_the_top_of_the_grid(self):
+        # The newest minor failing means we cannot say what the range is at all.
+        results = {version: ok() for version in GRID}
+        results["32.2.0"] = incompatible()
+        with self.assertRaises(obs_compat.RangeError):
+            obs_compat.derive_range(results, GRID, "32.2.2")
+
+    def test_only_failures_below_the_minimum_are_reported(self):
+        results = {version: ok() for version in GRID}
+        results["30.0.0"] = incompatible()
+        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        self.assertEqual(derived["min_supported"], "30.1")
+        self.assertEqual(derived["gaps"], ["30.0"])
+
+
 if __name__ == "__main__":
     unittest.main()

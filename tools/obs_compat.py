@@ -104,3 +104,56 @@ def qualifying_beta(tags: list[str]) -> str | None:
     newest = max(pres, key=sort_key)
     stable = parse_version(highest_stable(tags))
     return _format(newest) if sort_key(newest) > sort_key(stable) else None
+
+
+class RangeError(Exception):
+    """No supported range can be derived from these results."""
+
+
+def _minor_label(candidate: str) -> str:
+    major, minor, _patch, _suffix = parse_version(candidate)
+    return f"{major}.{minor}"
+
+
+def derive_range(results: dict[str, dict], grid: list[str], max_tested: str) -> dict:
+    """The declared minimum is the start of the green block reaching the top.
+
+    Not the lowest minor that compiles: if 30.0 passes and 30.1 does not,
+    "30.0+" is a lie to everyone running 30.1. So the block is walked down from
+    the newest minor and stops at the first candidate that is not green,
+    whatever the reason.
+    """
+    if not grid:
+        raise RangeError("the version grid is empty")
+
+    newest = grid[-1]
+    if results.get(newest, {}).get("status") != "ok":
+        raise RangeError(
+            f"the newest probed minor ({newest}) is not green, so no range "
+            f"can be declared against {max_tested}"
+        )
+
+    index = len(grid) - 1
+    while index > 0 and results.get(grid[index - 1], {}).get("status") == "ok":
+        index -= 1
+
+    gaps, unverifiable = [], []
+    for candidate in grid[:index]:
+        result = results.get(candidate)
+        # A probe we never got back says as little as one whose SDK would not
+        # build: both are unknown, and unknown is not the same as unsupported.
+        if result is None:
+            unverifiable.append(_minor_label(candidate))
+        elif result.get("status") == "fail":
+            # A failure: was it the plugin or the SDK?
+            if result.get("phase") == "obs-build":
+                unverifiable.append(_minor_label(candidate))
+            else:
+                gaps.append(_minor_label(candidate))
+        # Else: status is ok, don't report success below the minimum
+
+    return {
+        "min_supported": _minor_label(grid[index]),
+        "gaps": gaps,
+        "unverifiable": unverifiable,
+    }
