@@ -32,6 +32,7 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
   - [macOS](#macos-universal)
 - [Unsigned builds](#unsigned-builds)
 - [Usage](#usage)
+- [Playlists, watch folders and scheduled starts](#playlists-watch-folders-and-scheduled-starts)
 - [Keyboard](#keyboard)
 - [End-of-clip modes](#end-of-clip-modes)
 - [Remote control & Stream Deck](#remote-control--stream-deck)
@@ -63,6 +64,17 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
   paths** on request so a gig folder can move between machines; `.m3u` files
   written by other players are read correctly. Optional **auto-restore** of the
   last playlist; **background** duration probing.
+- 📚 **A library of named playlists** in one deck — a warm-up set, the main set,
+  a folder of stingers — switched from a dropdown and kept between sessions,
+  with automatic **backups** you can restore from.
+- 👀 **Watch a folder**: media dropped into it joins the playlist by itself.
+- ⏰ **Scheduled start**: a playlist can begin at a wall-clock time, counting
+  down in the card first so it is never a surprise.
+- 🚨 **Panic**: one button (and hotkey, and Stream Deck key) stops playback and
+  cuts to a scene you nominate — a stopped media source holds its last frame,
+  so stopping alone is not enough.
+- 🩹 **Find moved files**: when files are reorganised between shows, the deck
+  looks for them by name where its other files live.
 - 🔇 **Mute** the bound source from the card, with an optional "unmute when a
   clip starts" — off by default, so the mute stays where you put it.
 - ⌨️ Global OBS **hotkeys** (next, previous, play/pause, stop, mute, recheck
@@ -162,6 +174,43 @@ picks a source for you, and never touches a file path you set up in OBS. Your
 choice is remembered, so it comes back when you return to the collection that
 owns that source.
 
+## Playlists, watch folders and scheduled starts
+
+The **playlist picker** at the top of the dock holds as many playlists as you
+like. The button beside it creates, renames, duplicates and deletes them, and
+opens **Playlist properties**, where two things belong to that playlist alone:
+
+| Property | What it does |
+|---|---|
+| **Watch folder** | Media files that appear in this folder are added to this playlist automatically. Files still being copied are given a moment to finish; a file already in the playlist is not added twice. |
+| **Start at** | The deck starts this playlist by itself at that wall-clock time. The card counts down to it for the last ten seconds, and a time that has already passed starts immediately rather than being ignored. |
+
+A playlist with either of these shows a mark in the picker (`●` watched,
+`⏱` scheduled), because a list that can act on its own should say so where you
+choose it.
+
+The library is **always saved and always restored** — a deck that forgot the
+sets you named would be broken, not configurable. It is copied aside when OBS
+starts, when it closes, and every ten minutes of editing; the last twenty copies
+are kept and **Settings → Restore a backup…** brings one back (backing up what
+you have first). A `session.json` from 1.3.x becomes the library's first
+playlist on upgrade, and is left in place so downgrading loses nothing.
+
+**Panic** stops playback and cuts to the scene named in Settings. Without a
+scene configured it still stops, and says so. It is on a button, an OBS hotkey,
+a Stream Deck key and the remote API, because that is a thing you press without
+looking.
+
+**Find moved files** (list context menu) searches the folders your other clips
+live in, the watch folder and the playlist's own folder for a file with the same
+name. One match is repaired; two are reported rather than guessed at, because
+picking the wrong `intro.mp4` mid-show is worse than saying nothing.
+
+**Import from an OBS source** reads the media paths out of any source that holds
+a list of them — a VLC source, OBS's own playlist source, whatever a plugin
+adds. It only reads: the deck drives the two source types whose settings it
+actually knows, and does not write settings it has never seen.
+
 ## Keyboard
 
 The dock is fully operable without a mouse — every control is reachable by Tab,
@@ -176,8 +225,8 @@ and the list carries the shortcuts you would expect.
 | **Ctrl+Z** / **Ctrl+Shift+Z** | Undo / redo the last playlist change |
 
 Global OBS hotkeys (assign them in OBS → Settings → Hotkeys) cover **Next**,
-**Previous**, **Play/Pause**, **Stop**, **Mute/unmute**, **Recheck missing
-files** and **Play item 1-9** — the last of these is what a MIDI controller or
+**Previous**, **Play/Pause**, **Stop**, **Panic**, **Mute/unmute**, **Recheck
+missing files** and **Play item 1-9** — the last of these is what a MIDI controller or
 foot pedal maps to.
 
 ## End-of-clip modes
@@ -209,6 +258,9 @@ script.
 | `Save` | `{ path }` | Write the playlist (format from the extension) |
 | `Move` | `{ from, to }` | Reorder one item |
 | `Remove` | `{ index }` | Remove one item |
+| `Panic` | — | Stop and cut to the panic scene |
+| `SwitchPlaylist` | `{ name }` | Make another playlist in the library active |
+| `GetPlaylists` | — | The library's playlist names and which is active |
 | `AddPaths` | `{ paths: [{ value }] }` | Append media files |
 | `Clear` | — | Empty the playlist |
 | `GetStatus` | — | See below |
@@ -217,8 +269,9 @@ script.
 `GetStatus` answers with `ok`, `count`, `currentIndex` — the fields it has always
 had — plus `currentTitle`, `currentPath`, `positionMs`, `durationMs`, `playing`,
 `paused`, `muted`, `sourceBound`, `sourceName`, `mode`, `modeName`,
-`playlistName`, `upNextIndex`, `upNextTitle` and `pluginVersion`. Nothing was
-removed, so existing scripts keep working.
+`playlistName`, `playlistIndex`, `scheduledStartMs`, `upNextIndex`,
+`upNextTitle` and `pluginVersion`. Nothing was removed, so existing scripts keep
+working.
 
 The deck also **emits events**, so a client can follow playback instead of
 polling: `item-started` (`index`, `title`, `path`, `durationMs`),
@@ -226,7 +279,7 @@ polling: `item-started` (`index`, `title`, `path`, `durationMs`),
 second), `mute-changed` (`muted`) and `playlist-completed`.
 
 An Elgato **Stream Deck companion** lives in [`streamdeck/`](streamdeck/) with
-Next / Previous / Play-Pause / Stop / Mute / Play Item actions (buildless JS). It
+Next / Previous / Play-Pause / Stop / Mute / Panic / Play Item actions (buildless JS). It
 reconnects on its own with backoff, drops rather than replays presses made while
 OBS was away, and shows the current clip — or `offline` — on the key. The
 property inspector has a **Test connection** button that tells apart a wrong
@@ -290,9 +343,12 @@ working agreement (one finding, one PR, one CHANGELOG entry).
 
 The `src/core/` library is plain C++17 with no OBS and no Qt, which is what
 makes the playlist model, the playlist formats, the playback engine, the shuffle
-bag, the undo history and the path handling unit-testable on their own. The
-engine drives an `IMediaTransport`: a fake in the tests, the OBS source at
-runtime. `src/plugin/` is the OBS and Qt layer on top of it.
+bag, the undo history, the playlist library, the schedule rules, the moved-file
+search and the path handling unit-testable on their own. The engine drives an
+`IMediaTransport`: a fake in the tests, the OBS source at runtime.
+`src/plugin/` is the OBS and Qt layer on top of it — the dock, a
+`QAbstractListModel` for the list, the media source controller, the settings
+store and the worker threads.
 
 ## Security
 

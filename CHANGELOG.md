@@ -5,6 +5,95 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] — 2026-08-31
+
+A fix for a regression 1.3.1 introduced, and the features the deck was missing
+to run a show on its own: a library of playlists, watched folders, scheduled
+starts, a panic button, and a way to find files that moved.
+
+### Fixed
+
+- **"Load next (paused)" advanced the playlist by two.** Reported against 1.3.1:
+  the first clip ended, the operator transitioned Program → Preview, and the
+  deck loaded the clip *after* the next one — with the wrong row marked as
+  playing, because that is genuinely where playback had gone.
+  Handing a media source a new file (`obs_source_update`, a restart, and for a
+  staged clip a pause on top) makes it report that the *outgoing* media ended,
+  on top of the end that started the sequence. That second end arrived when the
+  source was already off air, so it was acted on immediately: item 1 was staged
+  and item 2 replaced it before anyone saw item 1.
+  An end can only belong to a clip that has started. The engine now ignores one
+  that arrives before the source says the clip it was handed is playing, and
+  clears the flag either way — a source that never reports a start costs at most
+  one missed advance instead of wedging the deck. Four regression tests cover
+  the exact sequence, including the plain auto-advance case, which had the same
+  hazard without anyone hitting it.
+
+### Added
+
+- **A library of playlists.** A show is rarely one list: a warm-up set, the main
+  set, a folder of stingers. The picker at the top of the dock switches between
+  them; the button beside it creates, renames, duplicates and deletes them.
+  `SwitchPlaylist` and `GetPlaylists` join the remote API, and the library is
+  always saved and always restored — there is no "restore on startup" switch any
+  more, because a deck that forgot the sets you named would be broken, not
+  configurable. A `session.json` from 1.3.x becomes the first playlist on
+  upgrade and is left in place, so downgrading loses nothing.
+- **Automatic backups of the library**, taken when OBS starts, when it closes,
+  and every ten minutes of editing, twenty copies deep.
+  **Settings → Restore a backup…** brings one back — and backs up what you
+  currently have first, because restoring must not be the operation that loses
+  today's work.
+- **Watch folder**, per playlist: media files that appear in it are added
+  automatically. A file still being copied is given a moment to finish, and a
+  file already in the playlist is never added twice.
+- **Scheduled start**, per playlist: the deck begins at a wall-clock time you
+  set, counting down in the card for the last ten seconds first — the deck
+  acting on its own must never be a surprise. A time that has already passed
+  starts immediately rather than being ignored, because OBS may simply have been
+  closed. It fires once.
+- **Panic**: a button, an OBS hotkey, a Stream Deck key and a `Panic` request,
+  all of which stop playback and cut to a scene you nominate in Settings.
+  Stopping alone is not enough — a stopped media source holds its last frame on
+  air. Without a scene configured it still stops, and says why nothing else
+  happened.
+- **Find moved files** (list context menu): searches the folders your other
+  clips live in, the watch folder and the playlist's own folder for a file of
+  the same name. One match is repaired, and the repair is undoable; two matches
+  are reported rather than guessed at, because picking the wrong `intro.mp4`
+  mid-show is worse than saying nothing.
+- **Import from an OBS source**: reads the media paths out of any source that
+  holds a list of them — a VLC source, OBS's own playlist source, whatever a
+  plugin adds. It only reads. The deck drives the two source types whose
+  settings it has verified against OBS's own code, and does not write settings
+  it has never seen; guessing the third is exactly the mistake that left VLC
+  support inert for three releases.
+- A playlist that can act on its own says so in the picker (`●` watched,
+  `⏱` scheduled).
+
+### Changed
+
+- **The list is a model and a view** (`QAbstractListModel` + `QListView`)
+  instead of a `QListWidget`. Every change used to mean clearing the widget and
+  rebuilding every row, taking the selection, the scroll position and any open
+  editor with them; a batch of durations arriving now updates only the rows that
+  changed. Reordering and renaming are requests the dock answers through the
+  undo history, and a reorder keeps playing what was playing — found again by
+  path, not by the row it used to occupy.
+- Playback moving on its own scrolls the list to the clip that started, without
+  taking the selection away from wherever the operator put it.
+- Adding files skips paths already in the playlist.
+- `GetStatus` reports `playlistIndex` and `scheduledStartMs`.
+- The locale check now also fails on a translated key that nothing uses: nine
+  translations of a string nobody can see are nine translations to maintain for
+  nothing. Three such keys were retired.
+
+### Security
+
+- The library file is read with the same care as the session file it replaces: a
+  version from the future is set aside rather than half-understood, and one
+  damaged playlist inside it costs that playlist, not the library.
+
 ## [1.3.1] — 2026-08-31
 
 Audio control in the deck, the last of the remote API, and the structural work
@@ -466,6 +555,7 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
+[1.3.2]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.6...v1.3.0
 [1.2.6]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.5...v1.2.6

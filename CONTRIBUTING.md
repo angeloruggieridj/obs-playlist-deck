@@ -27,8 +27,8 @@ python tools/check_version.py         # CMake, Stream Deck manifest, CHANGELOG a
 
 | Where | What |
 |---|---|
-| `src/core/` | Plain C++17. No OBS, no Qt. Playlist model, playlist formats, path handling, the playback engine (end-of-clip modes, shuffle bag, staged clips), undo history, version compare. |
-| `src/plugin/` | The OBS module: dock UI, media source controller, settings store, worker threads, vendor API. |
+| `src/core/` | Plain C++17. No OBS, no Qt. Playlist model, playlist formats, path handling, the playback engine (end-of-clip modes, shuffle bag, staged clips), the playlist library, schedule rules, moved-file search, undo history, version compare. |
+| `src/plugin/` | The OBS module: dock UI, the list's model and view, media source controller, settings store, worker threads, vendor API. |
 | `tests/` | doctest. Unit tests for the core, plus source-inspection tests (see below). |
 | `data/locale/` | Generated. Edit `tools/locales.json` instead. |
 | `streamdeck/` | Buildless JS companion plugin. |
