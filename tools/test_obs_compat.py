@@ -481,5 +481,38 @@ class FetchTagsPagination(unittest.TestCase):
         self.assertEqual(tags, ["30.0.0"])
 
 
+class Aggregate(unittest.TestCase):
+    def test_it_reads_one_file_per_probe_from_nested_artifact_dirs(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            for version, payload in (("30.0.0", unbuildable()), ("32.2.2", ok())):
+                folder = root / f"compat-{version}"
+                folder.mkdir()
+                (folder / f"compat-{version}.json").write_text(
+                    json.dumps({"obs": version, **payload}), encoding="utf-8")
+            self.assertEqual(obs_compat.aggregate(root),
+                             {"30.0.0": unbuildable(), "32.2.2": ok()})
+
+    def test_an_empty_artifact_dir_aggregates_to_nothing(self):
+        with tempfile.TemporaryDirectory() as name:
+            self.assertEqual(obs_compat.aggregate(Path(name)), {})
+
+
+class SummaryTable(unittest.TestCase):
+    def test_it_names_the_phase_of_every_failure(self):
+        manifest = sample_manifest()
+        manifest["results"]["30.0.0"] = unbuildable()
+        table = obs_compat.summary_table(manifest)
+        self.assertIn("30.0.0", table)
+        self.assertIn("obs-build", table)
+
+
+class ExitCodes(unittest.TestCase):
+    def test_the_codes_are_distinct(self):
+        codes = {obs_compat.EXIT_OK, obs_compat.EXIT_INCOMPATIBLE,
+                 obs_compat.EXIT_STALE, obs_compat.EXIT_NO_RANGE}
+        self.assertEqual(len(codes), 4)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,8 +12,12 @@ plugin's real one.
 """
 from __future__ import annotations
 
+import argparse
+import datetime
 import json
+import os
 import re
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -398,3 +402,132 @@ def fetch_tags(token: str | None) -> list[str]:
                 f"the OBS tag list exceeded the {TAG_CAP}-tag cap in fetch_tags(); "
                 "raise TAG_CAP")
     return tags
+
+
+EXIT_OK = 0
+EXIT_INCOMPATIBLE = 1
+EXIT_STALE = 2
+EXIT_NO_RANGE = 3
+
+
+def aggregate(artifact_dir: Path) -> dict[str, dict]:
+    results: dict[str, dict] = {}
+    for path in sorted(artifact_dir.glob("**/compat-*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        version = payload.pop("obs")
+        results[version] = payload
+    return results
+
+
+def summary_table(manifest: dict) -> str:
+    lines = [
+        f"### OBS compatibility — {manifest['min_supported']} – {manifest['max_tested']}",
+        "",
+        "| version | env | status | phase |",
+        "|---|---|---|---|",
+    ]
+    for version, result in manifest["results"].items():
+        mark = "✅" if result["status"] == "ok" else "❌"
+        lines.append(f"| `{version}` | {result['env']} | {mark} {result['status']} "
+                     f"| {result['phase'] or '—'} |")
+    return "\n".join(lines) + "\n"
+
+
+def _emit_output(name: str, value: str) -> None:
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(f"{name}<<__EOF__\n{value}\n__EOF__\n")
+    else:
+        print(f"{name}={value}")
+
+
+def _discover() -> int:
+    tags = fetch_tags(os.environ.get("GITHUB_TOKEN"))
+    grid = select_grid(tags)
+    latest = highest_stable(tags)
+    beta = qualifying_beta(tags)
+    manifest = load_manifest()
+    full = needs_full_run(os.environ.get("GITHUB_EVENT_NAME", ""),
+                          os.environ.get("GITHUB_SCHEDULE", ""),
+                          os.environ.get("GITHUB_REF", ""),
+                          manifest, latest, beta)
+    matrix = build_matrix(grid, latest, beta, manifest)
+    _emit_output("run_full", "true" if full else "false")
+    _emit_output("grid", json.dumps(grid))
+    _emit_output("latest_stable", latest)
+    _emit_output("beta", beta or "")
+    _emit_output("native", json.dumps([e for e in matrix if e["env"] == "native"]))
+    _emit_output("jammy", json.dumps([e for e in matrix if e["env"] == "jammy"]))
+    print(f"grid={grid} latest={latest} beta={beta} run_full={full}", file=sys.stderr)
+    return EXIT_OK
+
+
+def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None) -> int:
+    results = aggregate(artifact_dir)
+    broken = [version for version, result in results.items()
+              if result.get("phase") == "plugin-build"]
+    try:
+        manifest = build_manifest(results, grid, latest, beta,
+                                  datetime.date.today().isoformat())
+    except RangeError as error:
+        print(f"::error::{error}", file=sys.stderr)
+        return EXIT_NO_RANGE
+
+    save_manifest(manifest)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as handle:
+            handle.write(summary_table(manifest))
+    else:
+        print(summary_table(manifest))
+
+    if broken:
+        print(f"::error::the plugin does not build against {', '.join(sorted(broken))}. "
+              f"This is an incompatibility, not a CI failure.", file=sys.stderr)
+        return EXIT_INCOMPATIBLE
+
+    problems = check()
+    for problem in problems:
+        print(f"::error::{problem}", file=sys.stderr)
+    if problems:
+        print("::notice::every probe is green — the declared range simply moved. "
+              "Run: python3 tools/obs_compat.py --write", file=sys.stderr)
+        return EXIT_STALE
+    return EXIT_OK
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--discover", action="store_true")
+    mode.add_argument("--report", action="store_true")
+    mode.add_argument("--write", action="store_true")
+    mode.add_argument("--check", action="store_true")
+    parser.add_argument("--artifacts", type=Path, default=ROOT / "compat-artifacts")
+    parser.add_argument("--grid", help="JSON list, from the discover job")
+    parser.add_argument("--latest-stable")
+    parser.add_argument("--beta", default="")
+    args = parser.parse_args()
+
+    try:
+        if args.discover:
+            return _discover()
+        if args.report:
+            return _report(args.artifacts, json.loads(args.grid),
+                           args.latest_stable, args.beta or None)
+        if args.write:
+            write()
+            print("ok: README and OBS_VERSION now match obs-compat.json")
+            return EXIT_OK
+        problems = check()
+        for problem in problems:
+            print(f"error: {problem}", file=sys.stderr)
+        return EXIT_STALE if problems else EXIT_OK
+    except RangeError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return EXIT_NO_RANGE
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
