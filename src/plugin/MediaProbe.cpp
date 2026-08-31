@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "MediaProbe.hpp"
 
 #if defined(HAVE_FFMPEG)

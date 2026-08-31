@@ -1,3 +1,8 @@
+// Source-inspection test: it reads the plugin sources as text and asserts on
+// what it finds. The decision it pins needs a running OBS to exercise, and the
+// regression it guards against is silent — the dock simply stops coming back
+// where the user left it. See CONTRIBUTING.md for when to replace one of these
+// with a real unit test.
 #include "doctest/doctest.h"
 
 #include <fstream>
