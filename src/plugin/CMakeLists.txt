@@ -5,6 +5,24 @@ endif()
 find_package(obs-frontend-api REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Svg)
 
+# A Qt plugin loaded into OBS runs against the Qt that OBS itself ships, not the
+# one it was compiled with. A major.minor mismatch does not fail to load - it
+# crashes later, somewhere unrelated, which is the worst way to find out. Pass
+# -DPLD_EXPECTED_QT=6.7 (the Qt of the OBS release being targeted) and the build
+# refuses to produce a binary for the wrong one. Left empty, this is only a
+# printed note.
+set(PLD_EXPECTED_QT "" CACHE STRING "major.minor of the Qt that the target OBS ships")
+message(STATUS "Playlist Deck: building against Qt ${Qt6_VERSION}")
+if(PLD_EXPECTED_QT)
+  string(REGEX MATCH "^[0-9]+\.[0-9]+" _pld_qt_found "${Qt6_VERSION}")
+  if(NOT _pld_qt_found VERSION_EQUAL PLD_EXPECTED_QT)
+    message(FATAL_ERROR
+      "Qt ${Qt6_VERSION} found, but this build targets an OBS that ships Qt ${PLD_EXPECTED_QT}. "
+      "A plugin built against a different Qt major.minor loads and then crashes at runtime. "
+      "Fix the toolchain, or update PLD_EXPECTED_QT if OBS itself moved.")
+  endif()
+endif()
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
@@ -17,6 +35,7 @@ add_library(obs-playlist-deck MODULE
   MediaScanner.cpp
   UpdateChecker.cpp
   DeckStyle.cpp
+  SettingsStore.cpp
   ${CMAKE_SOURCE_DIR}/resources/icons.qrc
 )
 
