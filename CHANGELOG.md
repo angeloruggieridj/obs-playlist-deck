@@ -5,6 +5,81 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] — 2026-08-31
+
+Audio control in the deck, the last of the remote API, and the structural work
+1.3.0 deferred: the decisions about what plays and when are now testable without
+OBS.
+
+### Added
+
+- **Mute the bound source from the now-playing card.** The button reads the
+  source's own mute and follows it: change it in the OBS audio mixer and the
+  deck agrees, because it never keeps a second copy. There is a global hotkey
+  for it, a Stream Deck action, and `ToggleMute` / `SetMute` on the remote API.
+  Nothing about it is written to the plugin's settings — OBS already saves it
+  with the scene collection, and a second opinion would only disagree with the
+  first.
+- **"Unmute when a clip starts"**, in Settings, **off by default**. Off, the
+  mute stays exactly where the operator put it, across clip changes and across
+  restarts. On, every clip starts audible — including one that starts while the
+  source is on air, which is why it is opt-in rather than the default.
+- **Remote API**: `Save {path}`, `Move {from,to}` and `Remove {index}` complete
+  the set; `GetStatus` reports `muted`; a `mute-changed` event joins
+  `item-started`, `playback-state` and `playlist-completed`.
+- **The Stream Deck's *Play Item* action picks the clip by name.** The property
+  inspector loads the live playlist over the same connection the Test button
+  uses and offers it as a list. Nobody knows what index 7 is at showtime; the
+  number stays editable for a playlist that is not loaded yet.
+- **Micro-benchmarks** (`playlist-deck-tests -ts=benchmarks -s`) for the JSON and
+  M3U round-trips and the playlist edits, at 10 000 items. They log and never
+  fail: what they are for is the change that turns a linear path quadratic,
+  which is precisely how the per-rebuild `stat()` shipped.
+- **`docs/decisions.md`** — why the plugin is built the way it is, including
+  what is deliberately *not* done and what would make each decision wrong.
+
+### Changed
+
+- **The end-of-clip state machine moved into `src/core/` as `PlaybackEngine`,**
+  behind an `IMediaTransport` interface with five calls. It drives the OBS
+  source at runtime and a fake that records calls in the tests, so all six
+  modes, the shuffle bag and the staged-clip rule are now covered by 20 real
+  test cases instead of by asserting on the text of the dock's source. The
+  source-inspection test that pinned the staging rule was deleted, which is what
+  those tests are supposed to make possible.
+  Along the way the engine fixed a case the dock never handled: a staged clip
+  whose row is removed before it loads is dropped, instead of loading whatever
+  item inherited that position.
+- **Settings and session persistence moved into `SettingsStore`.** No widget
+  code touches a file any more, and `PlaylistDock.cpp` is about 300 lines
+  lighter despite gaining the audio controls.
+- The dock no longer keeps its own copy of the mode, the shuffle bag or the
+  pending staged row: there is one owner for each, which is the change that
+  makes the whole area testable.
+- Windows install instructions now document the **per-user** folder
+  (`%APPDATA%\obs-studio\plugins`) alongside the per-machine one. That is the
+  layout the release package has always been built for, and it needs no
+  administrator rights.
+- The undo button has its own glyph instead of the `×` that reads as "close",
+  and the orphaned `x.svg` is gone rather than left unused in the resources.
+
+### Security
+
+- **Every GitHub Action is pinned to a commit**, with its tag in a trailing
+  comment. A tag is a movable pointer: whoever can push to an action's
+  repository can repoint it at different code, and every workflow trusting that
+  tag runs it on the next build.
+- **The plugin build refuses a Qt it was not meant for.** A Qt plugin loaded
+  into OBS runs against *OBS's* Qt; a major.minor mismatch does not fail to
+  load, it crashes later somewhere unrelated. CI passes the expected version and
+  the build stops if the toolchain drifts.
+
+### Fixed
+
+- Six source files carried no SPDX identifier, and five of the
+  source-inspection test files did not say in the file what kind of test they
+  were or when to replace one.
+
 ## [1.3.0] — 2026-08-31
 
 The release that makes the deck do what it always said it did — VLC sources
@@ -391,6 +466,7 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
+[1.3.1]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.6...v1.3.0
 [1.2.6]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.4...v1.2.5

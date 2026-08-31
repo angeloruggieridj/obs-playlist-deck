@@ -27,11 +27,15 @@ python tools/check_version.py         # CMake, Stream Deck manifest, CHANGELOG a
 
 | Where | What |
 |---|---|
-| `src/core/` | Plain C++17. No OBS, no Qt. Playlist model, playlist formats, path handling, end-of-clip decisions, shuffle bag, undo history, version compare. |
-| `src/plugin/` | The OBS module: dock UI, media source controller, worker threads, vendor API. |
+| `src/core/` | Plain C++17. No OBS, no Qt. Playlist model, playlist formats, path handling, the playback engine (end-of-clip modes, shuffle bag, staged clips), undo history, version compare. |
+| `src/plugin/` | The OBS module: dock UI, media source controller, settings store, worker threads, vendor API. |
 | `tests/` | doctest. Unit tests for the core, plus source-inspection tests (see below). |
 | `data/locale/` | Generated. Edit `tools/locales.json` instead. |
 | `streamdeck/` | Buildless JS companion plugin. |
+
+The playback engine drives a `pld::IMediaTransport`: the OBS controller at
+runtime, a fake that records calls in the tests. If you are adding behaviour
+that decides *what plays and when*, it belongs behind that interface.
 
 **Put logic in `src/core/` when you can.** Anything that lives there can be
 tested in seconds without OBS running, which is the difference between a decision
@@ -67,6 +71,8 @@ with the comment updated.
   (`↗`, not the raw character or a byte escape) — there is a test for this,
   and the bug it prevents shipped once already.
 - Locale files are generated: change `tools/locales.json` and run the generator.
+- Read [docs/decisions.md](docs/decisions.md) before undoing something that
+  looks arbitrary — most of it was paid for with a bug.
 
 ## Translations
 
