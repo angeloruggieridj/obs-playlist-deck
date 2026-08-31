@@ -34,6 +34,7 @@ void MediaSourceController::bind(const std::string& sourceName) {
         signal_handler_connect(sh, "media_ended", &MediaSourceController::mediaEndedThunk, this);
         signal_handler_connect(sh, "media_started", &MediaSourceController::mediaStartedThunk, this);
         signal_handler_connect(sh, "deactivate", &MediaSourceController::deactivateThunk, this);
+        signal_handler_connect(sh, "mute", &MediaSourceController::muteThunk, this);
     }
 }
 
@@ -45,6 +46,7 @@ void MediaSourceController::unbind() {
             signal_handler_disconnect(sh, "media_started", &MediaSourceController::mediaStartedThunk,
                                       this);
             signal_handler_disconnect(sh, "deactivate", &MediaSourceController::deactivateThunk, this);
+            signal_handler_disconnect(sh, "mute", &MediaSourceController::muteThunk, this);
         }
         obs_source_release(source_);
         source_ = nullptr;
@@ -188,6 +190,19 @@ void MediaSourceController::restart() {
     if (source_) obs_source_media_restart(source_);
 }
 
+bool MediaSourceController::isMuted() const {
+    return source_ && obs_source_muted(source_);
+}
+
+void MediaSourceController::setMuted(bool muted) {
+    // obs_source_set_muted raises the source's "mute" signal, so the dock hears
+    // about its own change through the same path as a change from the mixer:
+    // one way in, one way out, no state to keep in sync.
+    if (source_) obs_source_set_muted(source_, muted);
+}
+
+void MediaSourceController::toggleMute() { setMuted(!isMuted()); }
+
 bool MediaSourceController::seekMs(long long ms) {
     if (!source_ || ms < 0) return false;
     obs_source_media_set_time(source_, static_cast<int64_t>(ms));
@@ -219,6 +234,11 @@ void MediaSourceController::mediaEndedThunk(void* data, calldata_t*) {
 void MediaSourceController::mediaStartedThunk(void* data, calldata_t*) {
     auto* self = static_cast<MediaSourceController*>(data);
     if (self && self->onStarted_) self->onStarted_();
+}
+
+void MediaSourceController::muteThunk(void* data, calldata_t* cd) {
+    auto* self = static_cast<MediaSourceController*>(data);
+    if (self && self->onMuteChanged_) self->onMuteChanged_(calldata_bool(cd, "muted"));
 }
 
 void MediaSourceController::deactivateThunk(void* data, calldata_t*) {

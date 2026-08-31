@@ -10,6 +10,8 @@ add_executable(playlist-deck-tests
   test_endmode.cpp
   test_history.cpp
   test_staging.cpp
+  test_playback_engine.cpp
+  test_benchmarks.cpp
   test_source_kind.cpp
   test_scene_collection_lifecycle.cpp
   test_source_binding.cpp
