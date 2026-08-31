@@ -13,6 +13,7 @@ const ACTION_REQUESTS = {
   [ACTION_PREFIX + "previous"]: () => ["Previous", {}],
   [ACTION_PREFIX + "playpause"]: () => ["PlayPause", {}],
   [ACTION_PREFIX + "stop"]: () => ["Stop", {}],
+  [ACTION_PREFIX + "mute"]: () => ["ToggleMute", {}],
   [ACTION_PREFIX + "playitem"]: (settings) => [
     "PlayIndex",
     { index: parseInt(settings && settings.index, 10) || 0 },
@@ -220,6 +221,8 @@ function titleFor(action, settings) {
   const short = (text) => (text || "").slice(0, 18);
   if (action.endsWith(".playpause")) return short(s.currentTitle);
   if (action.endsWith(".next")) return short(s.upNextTitle);
+  // The mute key is the one place the state is not obvious from the artwork.
+  if (action.endsWith(".mute")) return s.muted ? "muted" : "sound on";
   if (action.endsWith(".playitem")) {
     const index = parseInt(settings && settings.index, 10) || 0;
     return index === s.currentIndex ? "> " + (index + 1) : String(index + 1);

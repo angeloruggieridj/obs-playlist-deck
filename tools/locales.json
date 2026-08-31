@@ -1523,6 +1523,78 @@
       "zh-CN": "重复播放同一个片段。",
       "ja-JP": "同じクリップを繰り返します。",
       "ko-KR": "같은 클립을 반복합니다."
+    },
+    "Btn.Mute": {
+      "en-US": "Mute",
+      "it-IT": "Muto",
+      "es-ES": "Silenciar",
+      "fr-FR": "Muet",
+      "de-DE": "Stumm",
+      "pt-BR": "Mudo",
+      "ru-RU": "Звук",
+      "zh-CN": "静音",
+      "ja-JP": "ミュート",
+      "ko-KR": "음소거"
+    },
+    "Tip.Mute": {
+      "en-US": "Mute or unmute the bound source",
+      "it-IT": "Attiva o disattiva il muto sulla sorgente collegata",
+      "es-ES": "Silenciar o restaurar el sonido de la fuente vinculada",
+      "fr-FR": "Couper ou rétablir le son de la source liée",
+      "de-DE": "Ton der verbundenen Quelle stumm schalten oder wieder einschalten",
+      "pt-BR": "Silenciar ou restaurar o som da fonte vinculada",
+      "ru-RU": "Выключить или включить звук привязанного источника",
+      "zh-CN": "静音或取消静音已绑定的源",
+      "ja-JP": "バインドしたソースのミュートを切り替えます",
+      "ko-KR": "연결된 소스를 음소거하거나 해제합니다"
+    },
+    "Status.Muted": {
+      "en-US": "Muted.",
+      "it-IT": "Audio disattivato.",
+      "es-ES": "Silenciado.",
+      "fr-FR": "Son coupé.",
+      "de-DE": "Stumm geschaltet.",
+      "pt-BR": "Silenciado.",
+      "ru-RU": "Звук выключен.",
+      "zh-CN": "已静音。",
+      "ja-JP": "ミュートしました。",
+      "ko-KR": "음소거했습니다."
+    },
+    "Status.Unmuted": {
+      "en-US": "Sound on.",
+      "it-IT": "Audio attivo.",
+      "es-ES": "Sonido activado.",
+      "fr-FR": "Son rétabli.",
+      "de-DE": "Ton an.",
+      "pt-BR": "Som ligado.",
+      "ru-RU": "Звук включён.",
+      "zh-CN": "已取消静音。",
+      "ja-JP": "ミュートを解除しました。",
+      "ko-KR": "음소거를 해제했습니다."
+    },
+    "Settings.UnmuteOnStart": {
+      "en-US": "Unmute when a clip starts",
+      "it-IT": "Togli il muto quando parte un clip",
+      "es-ES": "Quitar el silencio al empezar un clip",
+      "fr-FR": "Rétablir le son au début d’un clip",
+      "de-DE": "Stummschaltung beim Clip-Start aufheben",
+      "pt-BR": "Tirar o mudo quando um clipe começa",
+      "ru-RU": "Включать звук при старте клипа",
+      "zh-CN": "片段开始时取消静音",
+      "ja-JP": "クリップ開始時にミュートを解除",
+      "ko-KR": "클립이 시작될 때 음소거 해제"
+    },
+    "Settings.UnmuteOnStartTip": {
+      "en-US": "Off by default: the mute stays where you put it, across clips. On, every clip starts audible - including one that starts while the source is on air.",
+      "it-IT": "Disattivato per impostazione predefinita: il muto resta come lo hai lasciato, anche cambiando clip. Attivo, ogni clip parte con l’audio - anche se la sorgente è in onda.",
+      "es-ES": "Desactivado por defecto: el silencio se mantiene entre clips. Activado, cada clip empieza con sonido, incluso si la fuente está al aire.",
+      "fr-FR": "Désactivé par défaut : la coupure du son est conservée d’un clip à l’autre. Activé, chaque clip démarre avec le son, même si la source est à l’antenne.",
+      "de-DE": "Standardmäßig aus: die Stummschaltung bleibt über Clips hinweg bestehen. An startet jeder Clip hörbar - auch wenn die Quelle gerade auf Sendung ist.",
+      "pt-BR": "Desligado por padrão: o mudo permanece como você deixou, de um clipe para outro. Ligado, todo clipe começa com som - inclusive no ar.",
+      "ru-RU": "По умолчанию выключено: отключённый звук сохраняется между клипами. Включено - каждый клип начинается со звуком, даже если источник в эфире.",
+      "zh-CN": "默认关闭：静音状态在切换片段时保持不变。开启后每个片段都会有声音，包括该源正在直播时。",
+      "ja-JP": "既定はオフ: ミュートはクリップをまたいでそのまま保たれます。オンにすると、本線に出ている場合も含め、どのクリップも音声ありで始まります。",
+      "ko-KR": "기본값은 꺼짐: 음소거 상태가 클립이 바뀌어도 유지됩니다. 켜면 송출 중인 경우를 포함해 모든 클립이 소리와 함께 시작됩니다."
     }
   }
 }

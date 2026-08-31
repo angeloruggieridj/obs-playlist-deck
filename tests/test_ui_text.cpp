@@ -1,3 +1,7 @@
+// Source-inspection test: it reads the plugin sources and the shipped locale
+// files as text. It exists because the bugs it guards against — a mis-encoded
+// literal, an untranslated control — are invisible until someone runs the
+// plugin in the wrong language on the wrong platform. See CONTRIBUTING.md.
 #include "doctest/doctest.h"
 
 #include <fstream>
@@ -157,7 +161,7 @@ TEST_CASE("toolbar buttons are icon-only with a localized tooltip") {
     // the accessible name, the Tip.* key the tooltip.
     for (const char* key : {"Refresh", "Add", "Remove", "Up", "Down", "Clear", "Play", "Prev",
                             "Pause", "Stop", "Next", "Save", "Open", "Settings", "Rename",
-                            "Undo"}) {
+                            "Undo", "Mute"}) {
         CAPTURE(key);
         CHECK(dock.find(std::string("T(\"Btn.") + key + "\")") != std::string::npos);
         CHECK(dock.find(std::string("T(\"Tip.") + key + "\")") != std::string::npos);

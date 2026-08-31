@@ -161,6 +161,47 @@ static void ws_add_paths(obs_data_t* req, obs_data_t* resp, void*) {
     obs_data_set_bool(resp, "ok", ok);
 }
 
+static void ws_toggle_mute(obs_data_t*, obs_data_t* resp, void*) {
+    obs_data_set_bool(resp, "ok", invoke_simple("wsToggleMute"));
+}
+static void ws_set_mute(obs_data_t* req, obs_data_t* resp, void*) {
+    bool ok = false;
+    if (g_dock && obs_data_has_user_value(req, "muted")) {
+        const bool muted = obs_data_get_bool(req, "muted");
+        ok = QMetaObject::invokeMethod(g_dock, "wsSetMute", Qt::QueuedConnection,
+                                       Q_ARG(bool, muted));
+    }
+    obs_data_set_bool(resp, "ok", ok);
+}
+static void ws_save(obs_data_t* req, obs_data_t* resp, void*) {
+    bool ok = false;
+    const char* path = obs_data_get_string(req, "path");
+    if (g_dock && path && *path) {
+        ok = QMetaObject::invokeMethod(g_dock, "wsSave", Qt::QueuedConnection,
+                                       Q_ARG(QString, QString::fromUtf8(path)));
+    }
+    obs_data_set_bool(resp, "ok", ok);
+}
+static void ws_move(obs_data_t* req, obs_data_t* resp, void*) {
+    bool ok = false;
+    if (g_dock && obs_data_has_user_value(req, "from") && obs_data_has_user_value(req, "to")) {
+        const int from = static_cast<int>(obs_data_get_int(req, "from"));
+        const int to = static_cast<int>(obs_data_get_int(req, "to"));
+        ok = QMetaObject::invokeMethod(g_dock, "wsMove", Qt::QueuedConnection, Q_ARG(int, from),
+                                       Q_ARG(int, to));
+    }
+    obs_data_set_bool(resp, "ok", ok);
+}
+static void ws_remove(obs_data_t* req, obs_data_t* resp, void*) {
+    bool ok = false;
+    if (g_dock && obs_data_has_user_value(req, "index")) {
+        const int index = static_cast<int>(obs_data_get_int(req, "index"));
+        ok = QMetaObject::invokeMethod(g_dock, "wsRemove", Qt::QueuedConnection,
+                                       Q_ARG(int, index));
+    }
+    obs_data_set_bool(resp, "ok", ok);
+}
+
 static void ws_get_status(obs_data_t*, obs_data_t* resp, void*) {
     if (!g_dock) {
         obs_data_set_bool(resp, "ok", false);
@@ -178,6 +219,7 @@ static void ws_get_status(obs_data_t*, obs_data_t* resp, void*) {
     obs_data_set_bool(resp, "playing", s.playing);
     obs_data_set_bool(resp, "paused", s.paused);
     obs_data_set_bool(resp, "sourceBound", s.sourceBound);
+    obs_data_set_bool(resp, "muted", s.muted);
     obs_data_set_string(resp, "sourceName", s.sourceName.toUtf8().constData());
     obs_data_set_int(resp, "mode", s.mode);
     obs_data_set_string(resp, "modeName", s.modeName.toUtf8().constData());
@@ -233,6 +275,11 @@ static void register_vendor() {
     obs_websocket_vendor_register_request(g_vendor, "Seek", ws_seek, nullptr);
     obs_websocket_vendor_register_request(g_vendor, "AddPaths", ws_add_paths, nullptr);
     obs_websocket_vendor_register_request(g_vendor, "Clear", ws_clear, nullptr);
+    obs_websocket_vendor_register_request(g_vendor, "SetMute", ws_set_mute, nullptr);
+    obs_websocket_vendor_register_request(g_vendor, "ToggleMute", ws_toggle_mute, nullptr);
+    obs_websocket_vendor_register_request(g_vendor, "Save", ws_save, nullptr);
+    obs_websocket_vendor_register_request(g_vendor, "Move", ws_move, nullptr);
+    obs_websocket_vendor_register_request(g_vendor, "Remove", ws_remove, nullptr);
     blog(LOG_INFO, "[obs-playlist-deck] obs-websocket vendor registered");
 }
 
