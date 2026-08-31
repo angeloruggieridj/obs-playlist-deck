@@ -9,6 +9,8 @@ add_library(playlist-deck-core STATIC
   History.cpp
   SourceKind.cpp
   PlaybackEngine.cpp
+  Library.cpp
+  Heal.cpp
 )
 target_include_directories(playlist-deck-core
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

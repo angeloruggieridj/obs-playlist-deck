@@ -22,7 +22,11 @@ PlaybackResult PlaybackEngine::startAt(int index) {
     const PlaylistItem* item = playlist_.current();
     if (!item) return {};
     if (!transport_.bound()) return {PlaybackOutcome::NoSource, index};
-    if (!transport_.playFile(item->path)) return {PlaybackOutcome::Failed, index};
+    awaitingStart_ = true;
+    if (!transport_.playFile(item->path)) {
+        awaitingStart_ = false;
+        return {PlaybackOutcome::Failed, index};
+    }
     return {PlaybackOutcome::Started, index};
 }
 
@@ -31,7 +35,11 @@ PlaybackResult PlaybackEngine::stageAt(int index) {
     const PlaylistItem* item = playlist_.current();
     if (!item) return {};
     if (!transport_.bound()) return {PlaybackOutcome::NoSource, index};
-    if (!transport_.stageFile(item->path)) return {PlaybackOutcome::Failed, index};
+    awaitingStart_ = true;
+    if (!transport_.stageFile(item->path)) {
+        awaitingStart_ = false;
+        return {PlaybackOutcome::Failed, index};
+    }
     return {PlaybackOutcome::Staged, index};
 }
 
@@ -58,6 +66,22 @@ PlaybackResult PlaybackEngine::prev() {
 }
 
 PlaybackResult PlaybackEngine::mediaEnded() {
+    // Regression, 1.3.1: with "Load next (paused)", one clip ending advanced the
+    // playlist by two. Handing the source a new file - obs_source_update plus a
+    // restart, and for a staged clip a pause on top - makes it report that the
+    // *outgoing* media ended, on top of the end that got us here. That second
+    // end arrived while the deck was already off air, so it was acted on
+    // immediately: item 1 was staged and then item 2 replaced it before anyone
+    // saw item 1.
+    //
+    // An end can only belong to a clip that has started. Until the source says
+    // so, one is not ours; the flag is cleared either way, so a source that
+    // never reports a start costs at most one missed advance rather than
+    // wedging the deck.
+    if (awaitingStart_) {
+        awaitingStart_ = false;
+        return {};
+    }
     const int candidate = (mode_ == EndMode::Shuffle) ? drawShuffle() : -1;
     const auto decision =
         decideOnEnd(mode_, playlist_.size(), playlist_.currentIndex(), candidate);

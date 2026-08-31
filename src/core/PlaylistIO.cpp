@@ -83,6 +83,76 @@ std::string toM3u(const std::vector<PlaylistItem>& items, const std::string& bas
     return os.str();
 }
 
+std::string toLibraryJson(const std::vector<PlaylistEntry>& entries, int active) {
+    json j;
+    j["version"] = 2;
+    j["active"] = active;
+    j["playlists"] = json::array();
+    for (const auto& e : entries) {
+        json p;
+        p["name"] = e.name;
+        p["sourcePath"] = e.sourcePath;
+        p["watchFolder"] = e.watchFolder;
+        p["scheduledStartMs"] = e.scheduledStartMs;
+        p["items"] = json::array();
+        for (const auto& it : e.items)
+            p["items"].push_back(
+                {{"path", it.path}, {"title", it.title}, {"duration", it.durationMs}});
+        j["playlists"].push_back(std::move(p));
+    }
+    return j.dump(2);
+}
+
+bool fromLibraryJson(const std::string& text, std::vector<PlaylistEntry>& entriesOut,
+                     int& activeOut) {
+    json j = json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return false;
+    entriesOut.clear();
+    activeOut = 0;
+
+    // A version 1 file is a single playlist: the session written by 1.3.x. It
+    // becomes the first entry of the library rather than being discarded.
+    if (!j.contains("playlists")) {
+        PlaylistEntry entry;
+        entry.name = j.value("name", std::string{});
+        std::string name;
+        if (!fromJson(text, name, entry.items).ok) return false;
+        if (entry.name.empty() || entry.name == "session") entry.name = "Playlist 1";
+        entriesOut.push_back(std::move(entry));
+        return true;
+    }
+    if (!j["playlists"].is_array()) return false;
+
+    for (const auto& p : j["playlists"]) {
+        if (!p.is_object()) continue;
+        PlaylistEntry entry;
+        entry.name = p.value("name", std::string{});
+        entry.sourcePath = p.value("sourcePath", std::string{});
+        entry.watchFolder = p.value("watchFolder", std::string{});
+        entry.scheduledStartMs = p.value("scheduledStartMs", static_cast<long long>(-1));
+        if (p.contains("items") && p["items"].is_array()) {
+            for (const auto& e : p["items"]) {
+                // Same leniency as a playlist file: one damaged entry costs that
+                // entry, not the library.
+                if (!e.is_object() || !e.contains("path") || !e["path"].is_string() ||
+                    e["path"].get<std::string>().empty())
+                    continue;
+                PlaylistItem it;
+                it.path = e["path"].get<std::string>();
+                it.title = e.contains("title") && e["title"].is_string()
+                               ? e["title"].get<std::string>()
+                               : std::string{};
+                if (it.title.empty()) it.title = mediapath::fileStem(it.path);
+                it.durationMs = readDuration(e);
+                entry.items.push_back(std::move(it));
+            }
+        }
+        entriesOut.push_back(std::move(entry));
+    }
+    activeOut = j.value("active", 0);
+    return true;
+}
+
 std::string toCsv(const std::vector<PlaylistItem>& items) {
     auto quote = [](const std::string& s) {
         std::string out = "\"";
