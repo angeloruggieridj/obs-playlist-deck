@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <obs.h>
+#include "PlaybackEngine.hpp"
 #include "SourceKind.hpp"
 
 // Wraps the libobs calls needed to drive an existing media source
@@ -13,9 +14,13 @@
 // The two source types take the file to play through completely different
 // settings, so everything that writes one goes through setFile() and the
 // SourceKind recorded at bind() time — see the comment there.
-class MediaSourceController {
+//
+// It implements pld::IMediaTransport, which is the whole of what the playback
+// engine is allowed to know about OBS: five calls, so the engine can be tested
+// against a fake instead of a running application.
+class MediaSourceController : public pld::IMediaTransport {
 public:
-    ~MediaSourceController();
+    ~MediaSourceController() override;
 
     static std::vector<std::string> listMediaSources();
 
@@ -25,6 +30,13 @@ public:
     std::string boundName() const { return boundName_; }
     pld::SourceKind kind() const { return kind_; }
 
+    // pld::IMediaTransport.
+    bool bound() const override { return isBound(); }
+    bool playFile(const std::string& path) override { return setFileAndRestart(path); }
+    bool stageFile(const std::string& path) override { return setFileLoadOnly(path); }
+    void stop() override;
+    bool inProgram() const override { return isInProgram(); }
+
     bool setFileAndRestart(const std::string& path);
     bool setFileLoadOnly(const std::string& path); // set file, then pause on first frame
     bool clearFile();                              // clear the file + stop (no stale playback)
@@ -33,10 +45,16 @@ public:
     long long currentTimeMs() const;               // playback position, -1 if not bound
     bool isPlaying() const;
     bool isPaused() const;
+
+    // Audio. The mute lives on the OBS source, shared with the audio mixer:
+    // the deck reads and writes it, and follows it when it is changed from
+    // elsewhere, rather than keeping a second opinion of its own.
+    bool isMuted() const;
+    void setMuted(bool muted);
+    void toggleMute();
     void play();
     void pause();
     void togglePlayPause();
-    void stop();
     void restart();
     bool seekMs(long long ms);
 
@@ -55,11 +73,15 @@ public:
     // for the staged-clip rule (a source removed from every scene never raises
     // a scene change), not as its primary trigger.
     void setOnDeactivated(std::function<void()> cb) { onDeactivated_ = std::move(cb); }
+    // Fires when the source's mute is changed by anyone — including the OBS
+    // mixer, which is why the dock cannot simply remember what it last set.
+    void setOnMuteChanged(std::function<void(bool)> cb) { onMuteChanged_ = std::move(cb); }
 
 private:
     static void mediaEndedThunk(void* data, calldata_t* cd);
     static void mediaStartedThunk(void* data, calldata_t* cd);
     static void deactivateThunk(void* data, calldata_t* cd);
+    static void muteThunk(void* data, calldata_t* cd);
 
     // Writes the path into whichever setting the bound source actually reads.
     bool writeFile(const std::string& path);
@@ -70,4 +92,5 @@ private:
     std::function<void()> onEnded_;
     std::function<void()> onStarted_;
     std::function<void()> onDeactivated_;
+    std::function<void(bool)> onMuteChanged_;
 };

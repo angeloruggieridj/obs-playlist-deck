@@ -97,23 +97,26 @@ TEST_CASE("remote status is read from a published snapshot, not the live model")
 // per probed duration, per reorder.
 TEST_CASE("state is written atomically and the session write is debounced") {
     const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    const std::string store = readSource("src/plugin/SettingsStore.cpp");
 
-    CHECK(dock.find("QSaveFile") != std::string::npos);
-    CHECK(dock.find("f.commit()") != std::string::npos);
-    // The only truncating open left in the file is QSaveFile's own, inside the
-    // helper: no caller writes over a file in place any more.
+    // The atomic write lives in the store now, and it is the only way in.
+    CHECK(store.find("QSaveFile") != std::string::npos);
+    CHECK(store.find("f.commit()") != std::string::npos);
+    CHECK(bodyOf(store, "bool SettingsStore::writeAtomically").find("QIODevice::WriteOnly") !=
+          std::string::npos);
     size_t truncatingOpens = 0;
-    for (size_t i = dock.find("QIODevice::WriteOnly"); i != std::string::npos;
-         i = dock.find("QIODevice::WriteOnly", i + 1))
+    for (size_t i = store.find("QIODevice::WriteOnly"); i != std::string::npos;
+         i = store.find("QIODevice::WriteOnly", i + 1))
         ++truncatingOpens;
     CHECK(truncatingOpens == 1);
-    CHECK(bodyOf(dock, "bool writeAtomically").find("QIODevice::WriteOnly") != std::string::npos);
-    CHECK(bodyOf(dock, "void PlaylistDock::saveSettings() const").find("writeAtomically") !=
+    // Nothing outside the store opens a file for writing at all.
+    CHECK(dock.find("QIODevice::WriteOnly") == std::string::npos);
+    CHECK(bodyOf(store, "bool SettingsStore::saveSettings").find("writeAtomically") !=
           std::string::npos);
-    CHECK(bodyOf(dock, "void PlaylistDock::saveSession() const").find("writeAtomically") !=
+    CHECK(bodyOf(store, "bool SettingsStore::saveSession").find("writeAtomically") !=
           std::string::npos);
     // The user's own playlist file gets the same treatment.
-    CHECK(bodyOf(dock, "void PlaylistDock::onSavePlaylist()").find("writeAtomically") !=
+    CHECK(bodyOf(dock, "bool PlaylistDock::writePlaylistTo").find("writeAtomically") !=
           std::string::npos);
 
     // rebuildList() schedules a save instead of performing one.
@@ -126,10 +129,10 @@ TEST_CASE("state is written atomically and the session write is debounced") {
           std::string::npos);
 
     // M-3: the schema version was written from the start but never read.
-    CHECK(bodyOf(dock, "void PlaylistDock::loadSession()").find("\"version\"") !=
+    CHECK(bodyOf(store, "SessionData SettingsStore::loadSession").find("\"version\"") !=
           std::string::npos);
     // F-26: the playlist came back but the label claimed nothing was loaded.
-    CHECK(bodyOf(dock, "void PlaylistDock::saveSession() const").find("loadedPath") !=
+    CHECK(bodyOf(store, "bool SettingsStore::saveSession").find("loadedPath") !=
           std::string::npos);
 }
 
@@ -168,14 +171,46 @@ TEST_CASE("a staged clip is triggered by scene changes, not by deactivate") {
     CHECK(main.find("OBS_FRONTEND_EVENT_STUDIO_MODE_DISABLED") != std::string::npos);
     CHECK(main.find("programLayoutChanged()") != std::string::npos);
 
-    // The decision itself is the pure rule in the core, so it is unit-tested.
-    CHECK(dock.find("pld::shouldStageNow") != std::string::npos);
+    // Only the wiring is pinned here. The rule itself moved into the playback
+    // engine and is exercised for real in test_playback_engine.cpp, against a
+    // transport that can be told whether it is on air.
+    CHECK(dock.find("engine_.programLayoutChanged()") != std::string::npos);
     // Which needs a real answer to "is the bound source on air".
     CHECK(controller.find("obs_frontend_get_current_scene()") != std::string::npos);
     CHECK(controller.find("obs_scene_find_source_recursive") != std::string::npos);
     // deactivate stays connected, as the fallback for a source removed from
     // every scene.
     CHECK(controller.find("\"deactivate\"") != std::string::npos);
+}
+
+// The extraction itself: the dock reacts to decisions, it does not make them.
+// Anything below that reads as playback logic in the dock is a regression
+// towards the god class this came out of.
+TEST_CASE("playback decisions live in the engine, not in the dock") {
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    const std::string hpp = readSource("src/plugin/PlaylistDock.hpp");
+    const std::string controller = readSource("src/plugin/MediaSourceController.hpp");
+
+    // The controller is reachable from the engine through five calls, which is
+    // what lets the engine be tested against a fake instead of a running OBS.
+    CHECK(controller.find("public pld::IMediaTransport") != std::string::npos);
+    for (const char* method : {"bool bound() const override", "bool playFile(", "bool stageFile(",
+                               "void stop() override", "bool inProgram() const override"}) {
+        CAPTURE(method);
+        CHECK(controller.find(method) != std::string::npos);
+    }
+
+    // The state the engine owns is no longer duplicated in the dock.
+    CHECK(hpp.find("pld::PlaybackEngine engine_") != std::string::npos);
+    CHECK(hpp.find("EndMode mode_") == std::string::npos);
+    CHECK(hpp.find("ShuffleQueue shuffle_") == std::string::npos);
+    CHECK(hpp.find("pendingStageNext_") == std::string::npos);
+
+    // And the dock no longer reimplements the decisions.
+    CHECK(dock.find("pld::decideOnEnd") == std::string::npos);
+    CHECK(dock.find("pld::decideOnNext") == std::string::npos);
+    CHECK(dock.find("pld::decideOnPrev") == std::string::npos);
+    CHECK(dock.find("applyPlayback(engine_.") != std::string::npos);
 }
 
 // F-7. The duration was read 700 ms after playIndex(), on a fixed timer with no
@@ -292,7 +327,8 @@ TEST_CASE("the vendor API stays backward compatible") {
     CHECK(main.find("obs_data_set_int(resp, \"currentIndex\"") != std::string::npos);
     // v2 additions.
     for (const char* request : {"\"GetItems\"", "\"SetMode\"", "\"Seek\"", "\"AddPaths\"",
-                                "\"Clear\""}) {
+                                "\"Clear\"", "\"SetMute\"", "\"ToggleMute\"", "\"Save\"",
+                                "\"Move\"", "\"Remove\""}) {
         CAPTURE(request);
         CHECK(main.find(request) != std::string::npos);
     }
@@ -302,6 +338,33 @@ TEST_CASE("the vendor API stays backward compatible") {
     CHECK(dock.find("\"item-started\"") != std::string::npos);
     CHECK(dock.find("\"playback-state\"") != std::string::npos);
     CHECK(dock.find("\"playlist-completed\"") != std::string::npos);
+}
+
+// The mute belongs to the OBS source, shared with the audio mixer. The deck
+// must read it and follow it, never keep a second copy: a remembered mute would
+// disagree with the mixer the moment anyone touched either one, and persisting
+// it in settings.json would fight OBS, which already saves it with the scene
+// collection.
+TEST_CASE("mute is read from the source, not remembered") {
+    const std::string controller = readSource("src/plugin/MediaSourceController.cpp");
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    const std::string store = readSource("src/plugin/SettingsStore.cpp");
+
+    CHECK(controller.find("obs_source_muted(source_)") != std::string::npos);
+    CHECK(controller.find("obs_source_set_muted(source_, muted)") != std::string::npos);
+    // The source's own "mute" signal is what redraws the button, so a change
+    // made in the OBS mixer shows up here too.
+    CHECK(controller.find("\"mute\"") != std::string::npos);
+    CHECK(dock.find("setOnMuteChanged") != std::string::npos);
+    CHECK(dock.find("controller_.isMuted()") != std::string::npos);
+    // No mute state is persisted by the plugin.
+    CHECK(store.find("muted") == std::string::npos);
+
+    // Auto-unmute is opt-in: a deck that silently un-mutes itself would put
+    // audio on air that the operator had deliberately taken off it.
+    CHECK(dock.find("settings_.unmuteOnStart && controller_.isMuted()") != std::string::npos);
+    CHECK(readSource("src/plugin/SettingsStore.hpp").find("unmuteOnStart = false") !=
+          std::string::npos);
 }
 
 // F-15. Four icons sat in the .qrc unused, which reads as abandoned work. They
@@ -314,7 +377,7 @@ TEST_CASE("no icon ships without being used") {
     for (const char* icon : {"plus", "minus", "chevron-up", "chevron-down", "undo", "play",
                              "pause", "stop", "skip-back", "skip-forward", "save", "folder-open",
                              "pencil", "trash", "download", "upload", "refresh", "settings",
-                             "search", "music"}) {
+                             "search", "music", "volume", "volume-x"}) {
         CAPTURE(icon);
         const std::string file = std::string("icons/") + icon + ".svg";
         CHECK(qrc.find("<file>" + file + "</file>") != std::string::npos);
@@ -324,5 +387,5 @@ TEST_CASE("no icon ships without being used") {
     size_t entries = 0;
     for (size_t i = qrc.find("<file>"); i != std::string::npos; i = qrc.find("<file>", i + 1))
         ++entries;
-    CHECK(entries == 20);
+    CHECK(entries == 22);
 }

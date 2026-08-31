@@ -17,7 +17,9 @@
 #include "History.hpp"
 #include "MediaScanner.hpp"
 #include "MediaSourceController.hpp"
+#include "SettingsStore.hpp"
 #include "Playlist.hpp"
+#include "PlaybackEngine.hpp"
 #include "Shuffle.hpp"
 #include "Staging.hpp"
 
@@ -49,6 +51,7 @@ struct DeckStatus {
     bool playing = false;
     bool paused = false;
     bool sourceBound = false;
+    bool muted = false;
     QString sourceName;
     int mode = 0;
     QString modeName;
@@ -98,6 +101,11 @@ public:
     Q_INVOKABLE void wsSeek(int ms);
     Q_INVOKABLE void wsClear();
     Q_INVOKABLE void wsAddPaths(const QStringList& paths);
+    Q_INVOKABLE void wsSetMute(bool muted);
+    Q_INVOKABLE void wsToggleMute();
+    Q_INVOKABLE void wsSave(const QString& path);
+    Q_INVOKABLE void wsMove(int from, int to);
+    Q_INVOKABLE void wsRemove(int index);
 
     // Thread-safe copy for the websocket thread.
     DeckStatus status() const;
@@ -121,6 +129,10 @@ private slots:
     void onRename();
     void onPlaySelected();
     void onTogglePlayPause();
+    void onToggleMute();
+    // The source's mute changed — from this button, from a hotkey, or from the
+    // OBS audio mixer, which is why the dock listens instead of remembering.
+    void onMuteChanged(bool muted);
     void onStop();
     void onNext();
     void onPrev();
@@ -161,12 +173,19 @@ private:
     void updateNowPlaying();
     void updateTotals();
     void updateTransportIcons();
+    void updateMuteButton();
     QString itemText(int row) const;
     void addPaths(const QStringList& paths, bool recordUndo = true);
     void playIndex(int row);
-    void loadIndex(int row);
-    void stagePendingNow();
+    // Turns an engine decision into status text, a duration capture, a vendor
+    // event and a redraw.
+    void applyPlayback(const pld::PlaybackResult& result);
     bool loadPlaylistFile(const QString& path);
+    // Shared by the Save button and the remote Save request: the extension
+    // decides the format, and the write is atomic either way.
+    bool writePlaylistTo(const QString& path);
+    // Shared by the Remove button, the Delete key and the remote request.
+    void removeRows(std::vector<int> rows);
     void setLoadedPlaylist(const QString& path);
     void setStatus(const QString& msg, StatusKind kind = StatusKind::Info);
     QIcon tintedIcon(const QString& resource) const;
@@ -187,18 +206,15 @@ private:
 
     void startScan(const QStringList& paths, bool replacesPlaylist = false);
     void rescanAll();
-    pld::ProgramPresence presence() const;
 
     // Clears the bound source's file only when this plugin is the one that put
     // it there. A path the user configured in OBS is never emptied.
     void clearStalePluginFile();
 
-    QString settingsPath() const;
     void saveSettings() const;
     void loadSettings();
-    void applyLocale();           // sets the module locale from language_
+    void applyLocale();           // sets the module locale from the chosen language
     void applyLocaleAndRebuild(); // applyLocale() + rebuild the UI in the new language
-    QString sessionPath() const;
     void saveSession() const;
     void scheduleSessionSave(); // debounced; the session used to be rewritten on every rebuild
     void loadSession();
@@ -209,34 +225,29 @@ private:
     void registerHotkeys();
     void unregisterHotkeys();
 
+    // Declaration order matters: the engine takes references to the three
+    // members above it.
     pld::Playlist playlist_;
-    pld::History history_;
     MediaSourceController controller_;
+    std::mt19937 rng_{std::random_device{}()};
+    // Owns what plays next and when — the end-of-clip modes, the shuffle bag and
+    // the staged-clip rule. All of it is unit-tested against a fake transport;
+    // the dock only reacts to what the engine decided.
+    pld::PlaybackEngine engine_{playlist_, controller_, rng_};
+    pld::History history_;
+    SettingsStore store_;
+    DeckSettings settings_;
     MediaScanner* scanner_ = nullptr;
     UpdateChecker* updateChecker_ = nullptr;
-    pld::EndMode mode_ = pld::EndMode::PlayNext;
-    pld::ShuffleQueue shuffle_;
 
-    // The media source the user chose. Survives scene collection switches where
-    // the incoming collection has no source by that name, so the binding comes
-    // back when they switch to a collection that does.
-    QString pendingSource_;
     bool obsShutdown_ = false;
     bool refreshing_ = false; // true while refreshSources() repopulates the combo
     bool renaming_ = false;   // true while an inline rename is being applied
-    bool pendingStageNext_ = false;
-    int pendingStageRow_ = -1;
     bool stagePauseWanted_ = false; // a staged clip must pause as soon as it opens
     int captureRow_ = -1;           // item whose duration the next media_started belongs to
     QString capturePath_;
     int captureRetries_ = 0;
-    bool enableProbe_ = true;
-    bool autoRestore_ = false;
-    bool relativePaths_ = false;
-    QString language_ = "auto"; // "auto" (follow OBS) | "en-US" | "it-IT" | ...
-    QString loadedPath_;        // currently loaded playlist file, for label restore
-    QString lastDir_;           // last folder used in a file dialog
-    std::mt19937 rng_{std::random_device{}()};
+    QString loadedPath_; // currently loaded playlist file, for label restore
 
     // Existence of each path, so rebuilding the list does not stat() every item
     // again. Filled by the scanner thread; a missing entry means "not checked
@@ -264,6 +275,7 @@ private:
     QLabel* status_ = nullptr;
     QLabel* versionLabel_ = nullptr;
     QPushButton* playPauseBtn_ = nullptr;
+    QPushButton* muteBtn_ = nullptr;
     int lastTransportState_ = -1; // 1 playing, 0 not, -1 unknown: skip identical repaints
     QPushButton* undoBtn_ = nullptr;
     QTimer* uiTimer_ = nullptr;
