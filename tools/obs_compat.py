@@ -510,7 +510,14 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None) 
         with open(summary, "a", encoding="utf-8") as handle:
             handle.write(summary_table(manifest))
     else:
-        print(summary_table(manifest))
+        try:
+            print(summary_table(manifest))
+        except UnicodeEncodeError:
+            # The console's encoding (e.g., Windows cp1252) cannot encode the ✅/❌
+            # marks. Rather than crash, silently skip the summary — it is diagnostic
+            # output and losing two glyphs is not worth losing the run. The CI path
+            # writes to a file with UTF-8, so marks are preserved there.
+            pass
 
     if broken:
         print(f"::error::the plugin does not build against {', '.join(sorted(broken))}. "

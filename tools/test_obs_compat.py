@@ -7,6 +7,7 @@ offline against a fixture of the OBS tag list rather than against the live API.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -615,12 +616,14 @@ class ReportMessageWhenDegraded(unittest.TestCase):
             # Create an initial manifest so check() will find differences
             obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
 
-            # Mock the root and capture stderr
+            # Set GITHUB_STEP_SUMMARY to a temp file (hermetic, real CI path, UTF-8)
+            summary_file = root / "summary.txt"
             with mock.patch.object(obs_compat, "ROOT", root):
-                import io
-                captured_stderr = io.StringIO()
-                with mock.patch("sys.stderr", captured_stderr):
-                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+                with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+                    import io
+                    captured_stderr = io.StringIO()
+                    with mock.patch("sys.stderr", captured_stderr):
+                        exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
@@ -657,12 +660,14 @@ class ReportMessageWhenDegraded(unittest.TestCase):
             # Create an initial manifest so check() will find differences
             obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
 
-            # Mock the root and capture stderr
+            # Set GITHUB_STEP_SUMMARY to a temp file (hermetic, real CI path, UTF-8)
+            summary_file = root / "summary.txt"
             with mock.patch.object(obs_compat, "ROOT", root):
-                import io
-                captured_stderr = io.StringIO()
-                with mock.patch("sys.stderr", captured_stderr):
-                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+                with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+                    import io
+                    captured_stderr = io.StringIO()
+                    with mock.patch("sys.stderr", captured_stderr):
+                        exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
@@ -693,12 +698,14 @@ class ReportMessageWhenDegraded(unittest.TestCase):
             # Create an initial manifest so check() will find differences
             obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
 
-            # Mock the root and capture stderr
+            # Set GITHUB_STEP_SUMMARY to a temp file (hermetic, real CI path, UTF-8)
+            summary_file = root / "summary.txt"
             with mock.patch.object(obs_compat, "ROOT", root):
-                import io
-                captured_stderr = io.StringIO()
-                with mock.patch("sys.stderr", captured_stderr):
-                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+                with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+                    import io
+                    captured_stderr = io.StringIO()
+                    with mock.patch("sys.stderr", captured_stderr):
+                        exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
