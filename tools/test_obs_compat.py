@@ -491,12 +491,15 @@ class Aggregate(unittest.TestCase):
                 folder.mkdir()
                 (folder / f"compat-{version}.json").write_text(
                     json.dumps({"obs": version, **payload}), encoding="utf-8")
-            self.assertEqual(obs_compat.aggregate(root),
-                             {"30.0.0": unbuildable(), "32.2.2": ok()})
+            results, skipped = obs_compat.aggregate(root)
+            self.assertEqual(results, {"30.0.0": unbuildable(), "32.2.2": ok()})
+            self.assertEqual(skipped, [])
 
     def test_an_empty_artifact_dir_aggregates_to_nothing(self):
         with tempfile.TemporaryDirectory() as name:
-            self.assertEqual(obs_compat.aggregate(Path(name)), {})
+            results, skipped = obs_compat.aggregate(Path(name))
+            self.assertEqual(results, {})
+            self.assertEqual(skipped, [])
 
     def test_an_empty_artifact_file_is_skipped_not_fatal(self):
         # The probe job that writes these files is explicitly allowed to
@@ -510,7 +513,9 @@ class Aggregate(unittest.TestCase):
             good.mkdir()
             (good / "compat-32.2.2.json").write_text(
                 json.dumps({"obs": "32.2.2", **ok()}), encoding="utf-8")
-            self.assertEqual(obs_compat.aggregate(root), {"32.2.2": ok()})
+            results, skipped = obs_compat.aggregate(root)
+            self.assertEqual(results, {"32.2.2": ok()})
+            self.assertEqual(len(skipped), 1)
 
     def test_a_malformed_artifact_file_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as name:
@@ -522,7 +527,9 @@ class Aggregate(unittest.TestCase):
             good.mkdir()
             (good / "compat-32.2.2.json").write_text(
                 json.dumps({"obs": "32.2.2", **ok()}), encoding="utf-8")
-            self.assertEqual(obs_compat.aggregate(root), {"32.2.2": ok()})
+            results, skipped = obs_compat.aggregate(root)
+            self.assertEqual(results, {"32.2.2": ok()})
+            self.assertEqual(len(skipped), 1)
 
     def test_an_artifact_missing_the_obs_key_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as name:
@@ -534,7 +541,9 @@ class Aggregate(unittest.TestCase):
             good.mkdir()
             (good / "compat-32.2.2.json").write_text(
                 json.dumps({"obs": "32.2.2", **ok()}), encoding="utf-8")
-            self.assertEqual(obs_compat.aggregate(root), {"32.2.2": ok()})
+            results, skipped = obs_compat.aggregate(root)
+            self.assertEqual(results, {"32.2.2": ok()})
+            self.assertEqual(len(skipped), 1)
 
     def test_a_version_with_an_unreadable_artifact_is_unverifiable_not_a_gap(self):
         # This is the semantic the fix exists to pin: an unreadable result
@@ -551,7 +560,8 @@ class Aggregate(unittest.TestCase):
                 else:
                     (folder / f"compat-{version}.json").write_text(
                         json.dumps({"obs": version, **ok()}), encoding="utf-8")
-            results = obs_compat.aggregate(root)
+            results, skipped = obs_compat.aggregate(root)
+            self.assertEqual(len(skipped), 1)
             derived = obs_compat.derive_range(results, GRID, "32.2.2")
             self.assertEqual(derived["unverifiable"], ["30.0"])
             self.assertEqual(derived["gaps"], [])
@@ -572,6 +582,130 @@ class ExitCodes(unittest.TestCase):
                  obs_compat.EXIT_STALE, obs_compat.EXIT_NO_RANGE,
                  obs_compat.EXIT_BAD_INPUT}
         self.assertEqual(len(codes), 5)
+
+
+class ReportMessageWhenDegraded(unittest.TestCase):
+    """Verify the _report message accurately reflects when evidence is missing."""
+
+    def test_report_with_skipped_artifact_does_not_claim_all_green(self):
+        # When an artifact is unreadable, do not claim every probe was green.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            # Set up a mock repo
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\nstale\n"
+                f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                'env:\n  OBS_VERSION: "32.2.2"\n', encoding="utf-8")
+
+            # Create artifact dir with all versions but 30.0.0 unreadable
+            artifact_dir = root / "compat-artifacts"
+            artifact_dir.mkdir()
+            for version in GRID:
+                folder = artifact_dir / f"compat-{version}"
+                folder.mkdir()
+                if version == "30.0.0":
+                    # Create an unreadable artifact
+                    (folder / f"compat-{version}.json").write_text("", encoding="utf-8")
+                else:
+                    (folder / f"compat-{version}.json").write_text(
+                        json.dumps({"obs": version, **ok()}), encoding="utf-8")
+
+            # Create an initial manifest so check() will find differences
+            obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
+
+            # Mock the root and capture stderr
+            with mock.patch.object(obs_compat, "ROOT", root):
+                import io
+                captured_stderr = io.StringIO()
+                with mock.patch("sys.stderr", captured_stderr):
+                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+
+            self.assertEqual(exit_code, obs_compat.EXIT_STALE)
+            stderr = captured_stderr.getvalue()
+            # Should mention artifacts couldn't be read
+            self.assertIn("artifact(s) could not be read", stderr)
+            # Should NOT claim every probe was green
+            self.assertNotIn("every probe is green", stderr)
+
+    def test_report_with_obs_build_failure_does_not_claim_all_green(self):
+        # When a probe failed at obs-build, do not claim every probe was green.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            # Set up a mock repo
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\nstale\n"
+                f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                'env:\n  OBS_VERSION: "32.2.2"\n', encoding="utf-8")
+
+            # Create artifact dir with all versions but 30.0.0 has obs-build failure
+            artifact_dir = root / "compat-artifacts"
+            artifact_dir.mkdir()
+            for version in GRID:
+                folder = artifact_dir / f"compat-{version}"
+                folder.mkdir()
+                if version == "30.0.0":
+                    (folder / f"compat-{version}.json").write_text(
+                        json.dumps({"obs": version, **unbuildable()}), encoding="utf-8")
+                else:
+                    (folder / f"compat-{version}.json").write_text(
+                        json.dumps({"obs": version, **ok()}), encoding="utf-8")
+
+            # Create an initial manifest so check() will find differences
+            obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
+
+            # Mock the root and capture stderr
+            with mock.patch.object(obs_compat, "ROOT", root):
+                import io
+                captured_stderr = io.StringIO()
+                with mock.patch("sys.stderr", captured_stderr):
+                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+
+            self.assertEqual(exit_code, obs_compat.EXIT_STALE)
+            stderr = captured_stderr.getvalue()
+            # Should NOT claim every probe was green (because obs-build failures exist)
+            self.assertNotIn("every probe is green", stderr)
+
+    def test_report_fully_green_stale_run_claims_probes_are_green(self):
+        # When all probes succeeded and nothing was skipped, the original message is used.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            # Set up a mock repo
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\nstale\n"
+                f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                'env:\n  OBS_VERSION: "32.2.2"\n', encoding="utf-8")
+
+            # Create artifact dir with all good artifacts
+            artifact_dir = root / "compat-artifacts"
+            artifact_dir.mkdir()
+            for version in GRID:
+                folder = artifact_dir / f"compat-{version}"
+                folder.mkdir()
+                (folder / f"compat-{version}.json").write_text(
+                    json.dumps({"obs": version, **ok()}), encoding="utf-8")
+
+            # Create an initial manifest so check() will find differences
+            obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
+
+            # Mock the root and capture stderr
+            with mock.patch.object(obs_compat, "ROOT", root):
+                import io
+                captured_stderr = io.StringIO()
+                with mock.patch("sys.stderr", captured_stderr):
+                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+
+            self.assertEqual(exit_code, obs_compat.EXIT_STALE)
+            stderr = captured_stderr.getvalue()
+            # Should claim every probe is green
+            self.assertIn("every probe is green", stderr)
+            # Should NOT mention artifacts that couldn't be read
+            self.assertNotIn("artifact(s) could not be read", stderr)
 
 
 class ReportRequiresItsArguments(unittest.TestCase):

@@ -414,27 +414,34 @@ EXIT_NO_RANGE = 3
 EXIT_BAD_INPUT = 4
 
 
-def aggregate(artifact_dir: Path) -> dict[str, dict]:
-    """One result per probe artifact, skipping any file this run cannot read.
+def aggregate(artifact_dir: Path) -> tuple[dict[str, dict], list[str]]:
+    """One result per probe artifact, plus the paths of any this run could not read.
 
     The probe job that produces these files is explicitly allowed to fail, so
     a truncated or half-written artifact is a realistic input, not a
-    hypothetical. Omitting it here is the semantically right answer, not a
-    dodge: a version with no usable result is exactly what derive_range
+    hypothetical. Omitting it from results is the semantically right answer,
+    not a dodge: a version with no usable result is exactly what derive_range
     already classifies as unverifiable -- the same rule it applies to a probe
     that never reported at all. An unreadable result must never read as an
     incompatible one.
+
+    The skipped list exists so a caller can tell a fully green run apart from
+    a degraded one that merely looks green because some evidence went
+    missing -- collapsing that distinction is what let --report claim "every
+    probe is green" while quietly working from a smaller result set.
     """
     results: dict[str, dict] = {}
+    skipped: list[str] = []
     for path in sorted(artifact_dir.glob("**/compat-*.json")):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             version = payload.pop("obs")
         except (json.JSONDecodeError, KeyError, OSError) as error:
             print(f"::warning::skipping unreadable artifact {path}: {error}", file=sys.stderr)
+            skipped.append(str(path))
             continue
         results[version] = payload
-    return results
+    return results, skipped
 
 
 def summary_table(manifest: dict) -> str:
@@ -487,7 +494,7 @@ def _discover() -> int:
 
 
 def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None) -> int:
-    results = aggregate(artifact_dir)
+    results, skipped = aggregate(artifact_dir)
     broken = [version for version, result in results.items()
               if result.get("phase") == "plugin-build"]
     try:
@@ -514,8 +521,20 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None) 
     for problem in problems:
         print(f"::error::{problem}", file=sys.stderr)
     if problems:
-        print("::notice::every probe is green — the declared range simply moved. "
-              "Run: python3 tools/obs_compat.py --write", file=sys.stderr)
+        # Determine if any probe failed at obs-build (SDK build failure).
+        obs_build_failures = [version for version, result in results.items()
+                               if result.get("phase") == "obs-build"]
+        if skipped or obs_build_failures:
+            # Do not claim every probe was green; some evidence is missing.
+            count = len(skipped)
+            print(f"::notice::compatibility matrix check failed: {count} artifact(s) "
+                  f"could not be read. See ::warning:: messages above. The supported "
+                  f"range may not have genuinely moved — inspect --artifacts and re-run "
+                  f"before running python3 tools/obs_compat.py --write", file=sys.stderr)
+        else:
+            # All probes succeeded and check found problems → range simply moved.
+            print("::notice::every probe is green — the declared range simply moved. "
+                  "Run: python3 tools/obs_compat.py --write", file=sys.stderr)
         return EXIT_STALE
     return EXIT_OK
 
