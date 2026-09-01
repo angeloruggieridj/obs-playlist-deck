@@ -493,7 +493,15 @@ def _discover() -> int:
     return EXIT_OK
 
 
-def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None) -> int:
+def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None,
+           root: Path = ROOT) -> int:
+    """`root` is threaded through to save_manifest()/check() explicitly.
+
+    Both bind a path default (MANIFEST_PATH, ROOT) at function-definition
+    time, so patching the module-level attribute afterwards does not change
+    an already-bound default argument -- the only way to redirect where the
+    manifest is read from and written to is to pass the path down here.
+    """
     results, skipped = aggregate(artifact_dir)
     broken = [version for version, result in results.items()
               if result.get("phase") == "plugin-build"]
@@ -504,27 +512,33 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None) 
         print(f"::error::{error}", file=sys.stderr)
         return EXIT_NO_RANGE
 
-    save_manifest(manifest)
+    save_manifest(manifest, root / "obs-compat.json")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as handle:
             handle.write(summary_table(manifest))
     else:
+        table = summary_table(manifest)
         try:
-            print(summary_table(manifest))
+            print(table)
         except UnicodeEncodeError:
-            # The console's encoding (e.g., Windows cp1252) cannot encode the ✅/❌
-            # marks. Rather than crash, silently skip the summary — it is diagnostic
-            # output and losing two glyphs is not worth losing the run. The CI path
-            # writes to a file with UTF-8, so marks are preserved there.
-            pass
+            # print() encodes the whole joined string as one unit, so a
+            # console that cannot represent the ✅/❌ marks (e.g. Windows'
+            # cp1252) raises before a single byte reaches stdout -- the
+            # entire table is lost, not just the two glyphs. Re-encoding
+            # for that console with lossy substitution keeps every row in
+            # front of the operator, marks degraded to '?', instead of
+            # discarding the run's only human-readable summary.
+            encoding = sys.stdout.encoding or "ascii"
+            sys.stdout.buffer.write(table.encode(encoding, errors="replace"))
+            sys.stdout.buffer.write(b"\n")
 
     if broken:
         print(f"::error::the plugin does not build against {', '.join(sorted(broken))}. "
               f"This is an incompatibility, not a CI failure.", file=sys.stderr)
         return EXIT_INCOMPATIBLE
 
-    problems = check()
+    problems = check(root)
     for problem in problems:
         print(f"::error::{problem}", file=sys.stderr)
     if problems:
@@ -532,12 +546,22 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None) 
         obs_build_failures = [version for version, result in results.items()
                                if result.get("phase") == "obs-build"]
         if skipped or obs_build_failures:
-            # Do not claim every probe was green; some evidence is missing.
-            count = len(skipped)
-            print(f"::notice::compatibility matrix check failed: {count} artifact(s) "
-                  f"could not be read. See ::warning:: messages above. The supported "
-                  f"range may not have genuinely moved — inspect --artifacts and re-run "
-                  f"before running python3 tools/obs_compat.py --write", file=sys.stderr)
+            # Do not claim every probe was green; some evidence is missing or
+            # failed for a reason other than the plugin. Name whichever of
+            # the two actually occurred rather than a fixed sentence that
+            # would point at a zero count or at ::warning:: lines that were
+            # never printed.
+            reasons = []
+            if skipped:
+                reasons.append(f"{len(skipped)} artifact(s) could not be read "
+                                f"(see ::warning:: messages above)")
+            if obs_build_failures:
+                reasons.append(f"the OBS SDK failed to build for "
+                                f"{', '.join(sorted(obs_build_failures))}")
+            print(f"::notice::compatibility matrix check failed: {'; '.join(reasons)}. "
+                  f"The supported range may not have genuinely moved — inspect "
+                  f"--artifacts and re-run before running "
+                  f"python3 tools/obs_compat.py --write", file=sys.stderr)
         else:
             # All probes succeeded and check found problems → range simply moved.
             print("::notice::every probe is green — the declared range simply moved. "

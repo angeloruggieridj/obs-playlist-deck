@@ -586,7 +586,14 @@ class ExitCodes(unittest.TestCase):
 
 
 class ReportMessageWhenDegraded(unittest.TestCase):
-    """Verify the _report message accurately reflects when evidence is missing."""
+    """Verify the _report message accurately reflects when evidence is missing.
+
+    Each test passes its own temp `root` straight into _report() (rather than
+    patching the obs_compat.ROOT module attribute, which check() and
+    save_manifest() never re-read because their path defaults are bound at
+    function-definition time) so that _report reads and writes only the
+    fixture README/workflow/manifest built here -- never the real repository.
+    """
 
     def test_report_with_skipped_artifact_does_not_claim_all_green(self):
         # When an artifact is unreadable, do not claim every probe was green.
@@ -618,12 +625,11 @@ class ReportMessageWhenDegraded(unittest.TestCase):
 
             # Set GITHUB_STEP_SUMMARY to a temp file (hermetic, real CI path, UTF-8)
             summary_file = root / "summary.txt"
-            with mock.patch.object(obs_compat, "ROOT", root):
-                with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
-                    import io
-                    captured_stderr = io.StringIO()
-                    with mock.patch("sys.stderr", captured_stderr):
-                        exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+            with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+                import io
+                captured_stderr = io.StringIO()
+                with mock.patch("sys.stderr", captured_stderr):
+                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None, root=root)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
@@ -631,6 +637,16 @@ class ReportMessageWhenDegraded(unittest.TestCase):
             self.assertIn("artifact(s) could not be read", stderr)
             # Should NOT claim every probe was green
             self.assertNotIn("every probe is green", stderr)
+
+            # Proof this consulted the fixture, not the real repo: the
+            # initial manifest written above declared 30.0.0 ok and
+            # unverifiable == []. Only a run against *this* artifact_dir and
+            # *this* root produces 30.0.0 missing from results and "30.0"
+            # promoted to unverifiable -- a run against the real repository
+            # root could not have rewritten this file at all.
+            written = obs_compat.load_manifest(root / "obs-compat.json")
+            self.assertNotIn("30.0.0", written["results"])
+            self.assertEqual(written["unverifiable"], ["30.0"])
 
     def test_report_with_obs_build_failure_does_not_claim_all_green(self):
         # When a probe failed at obs-build, do not claim every probe was green.
@@ -662,17 +678,24 @@ class ReportMessageWhenDegraded(unittest.TestCase):
 
             # Set GITHUB_STEP_SUMMARY to a temp file (hermetic, real CI path, UTF-8)
             summary_file = root / "summary.txt"
-            with mock.patch.object(obs_compat, "ROOT", root):
-                with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
-                    import io
-                    captured_stderr = io.StringIO()
-                    with mock.patch("sys.stderr", captured_stderr):
-                        exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+            with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+                import io
+                captured_stderr = io.StringIO()
+                with mock.patch("sys.stderr", captured_stderr):
+                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None, root=root)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
             # Should NOT claim every probe was green (because obs-build failures exist)
             self.assertNotIn("every probe is green", stderr)
+
+            # Proof this consulted the fixture: 30.0.0's obs-build failure is
+            # only visible in results/unverifiable if the manifest was
+            # rebuilt from this test's own artifact_dir and written back to
+            # this test's own root.
+            written = obs_compat.load_manifest(root / "obs-compat.json")
+            self.assertEqual(written["results"]["30.0.0"]["phase"], "obs-build")
+            self.assertEqual(written["unverifiable"], ["30.0"])
 
     def test_report_fully_green_stale_run_claims_probes_are_green(self):
         # When all probes succeeded and nothing was skipped, the original message is used.
@@ -700,12 +723,11 @@ class ReportMessageWhenDegraded(unittest.TestCase):
 
             # Set GITHUB_STEP_SUMMARY to a temp file (hermetic, real CI path, UTF-8)
             summary_file = root / "summary.txt"
-            with mock.patch.object(obs_compat, "ROOT", root):
-                with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
-                    import io
-                    captured_stderr = io.StringIO()
-                    with mock.patch("sys.stderr", captured_stderr):
-                        exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None)
+            with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+                import io
+                captured_stderr = io.StringIO()
+                with mock.patch("sys.stderr", captured_stderr):
+                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None, root=root)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
@@ -713,6 +735,15 @@ class ReportMessageWhenDegraded(unittest.TestCase):
             self.assertIn("every probe is green", stderr)
             # Should NOT mention artifacts that couldn't be read
             self.assertNotIn("artifact(s) could not be read", stderr)
+
+            # Proof this consulted the fixture: the summary file this test
+            # pointed GITHUB_STEP_SUMMARY at is the only place the table
+            # could have been written, since check(root) found the fixture
+            # README stale (real content would never contain "stale").
+            self.assertIn("32.2.2", summary_file.read_text(encoding="utf-8"))
+            written = obs_compat.load_manifest(root / "obs-compat.json")
+            self.assertEqual(written["unverifiable"], [])
+            self.assertIn("30.0.0", written["results"])
 
 
 class ReportRequiresItsArguments(unittest.TestCase):
