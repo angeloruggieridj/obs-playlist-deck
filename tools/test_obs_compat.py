@@ -746,6 +746,78 @@ class ReportMessageWhenDegraded(unittest.TestCase):
             self.assertIn("30.0.0", written["results"])
 
 
+class ReportDegradesAnUnencodableSummaryInsteadOfDroppingIt(unittest.TestCase):
+    """The stdout fallback must not silently swallow the whole table.
+
+    print() encodes the joined table string as one unit, so a console that
+    cannot represent the ✅/❌ marks (e.g. Windows' cp1252) used to raise
+    UnicodeEncodeError before a single byte reached stdout -- the entire
+    table was lost, not just the two glyphs, and the old `except: pass`
+    hid that. This is the one branch none of the ReportMessageWhenDegraded
+    tests reaches, because all three set GITHUB_STEP_SUMMARY and take the
+    file-write path instead.
+    """
+
+    def test_every_row_still_reaches_the_operator_with_marks_degraded(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\n"
+                f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                'env:\n  OBS_VERSION: "32.2.2"\n', encoding="utf-8")
+
+            artifact_dir = root / "compat-artifacts"
+            artifact_dir.mkdir()
+            for version in GRID:
+                folder = artifact_dir / f"compat-{version}"
+                folder.mkdir()
+                (folder / f"compat-{version}.json").write_text(
+                    json.dumps({"obs": version, **ok()}), encoding="utf-8")
+
+            import io
+
+            class ConsoleThatCannotEncodeTheMarks:
+                """Stands in for a real cp1252 console: write() raises
+                exactly the way the real one does on a string containing
+                ✅/❌, and whatever the degrade path writes to .buffer
+                afterward is what actually reached the operator."""
+                encoding = "cp1252"
+
+                def __init__(self):
+                    self.buffer = io.BytesIO()
+
+                def write(self, text):
+                    text.encode(self.encoding)
+
+                def flush(self):
+                    pass
+
+            fake_stdout = ConsoleThatCannotEncodeTheMarks()
+
+            # No GITHUB_STEP_SUMMARY: forces _report onto the print()
+            # fallback branch rather than the file-write branch the other
+            # three tests exercise. clear the key even if the ambient
+            # environment (e.g. a real GitHub Actions runner) set it.
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+                with mock.patch("sys.stdout", fake_stdout):
+                    with mock.patch("sys.stderr", io.StringIO()):
+                        obs_compat._report(artifact_dir, GRID, "32.2.2", None, root=root)
+
+            written = fake_stdout.buffer.getvalue().decode("cp1252")
+            # Every row reached the operator -- the whole table survived,
+            # not just an empty write.
+            for version in GRID:
+                self.assertIn(version, written)
+            self.assertIn("ok", written)
+            # The unencodable ✅ marks degraded to a substitute character
+            # rather than the row (or the whole print) being dropped.
+            self.assertNotIn("✅", written)
+            self.assertGreaterEqual(written.count("?"), len(GRID))
+
+
 class ReportRequiresItsArguments(unittest.TestCase):
     # Exit 1 is reserved for a genuine incompatibility; malformed CLI input
     # must never fall through argparse/json.loads into Python's default
