@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -110,51 +111,101 @@ def unbuildable(env: str = "jammy") -> dict:
 
 GRID = ["30.0.0", "30.1.0", "30.2.0", "31.0.0", "31.1.0", "32.0.0", "32.1.0", "32.2.0"]
 
+# The tag these fixtures use as max_tested throughout: a later patch of
+# GRID's newest minor (32.2.0 vs 32.2.2), exactly the gap CRITICAL 1 is
+# about. build_matrix probes it as its own candidate, separate from the
+# grid, so a realistic `results` dict always carries a key for it too.
+MAX_TESTED = "32.2.2"
+
+
+def grid_results() -> dict:
+    """GRID plus MAX_TESTED, every entry green -- the all-clear baseline.
+
+    Mirrors what a real fully-green run's `results` looks like: build_matrix
+    always probes max_tested as a candidate distinct from the grid, so tests
+    that construct `results` from GRID alone (as the old, buggy derive_range
+    let them get away with) are testing a shape that never occurs in
+    production.
+    """
+    results = {version: ok() for version in GRID}
+    results[MAX_TESTED] = ok()
+    return results
+
 
 class DeriveRange(unittest.TestCase):
     def test_all_green_declares_the_floor(self):
-        results = {version: ok() for version in GRID}
-        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        results = grid_results()
+        derived = obs_compat.derive_range(results, GRID, MAX_TESTED)
         self.assertEqual(derived["min_supported"], "30.0")
         self.assertEqual(derived["gaps"], [])
         self.assertEqual(derived["unverifiable"], [])
 
     def test_a_failing_middle_minor_raises_the_minimum(self):
         # 30.0 compiling does not make "30.0+" true when 30.1 does not.
-        results = {version: ok() for version in GRID}
+        results = grid_results()
         results["30.1.0"] = incompatible()
-        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        derived = obs_compat.derive_range(results, GRID, MAX_TESTED)
         self.assertEqual(derived["min_supported"], "30.2")
         self.assertEqual(derived["gaps"], ["30.1"])
 
     def test_an_unbuildable_sdk_is_unverifiable_not_incompatible(self):
-        results = {version: ok() for version in GRID}
+        results = grid_results()
         results["30.0.0"] = unbuildable()
         results["30.1.0"] = unbuildable()
-        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        derived = obs_compat.derive_range(results, GRID, MAX_TESTED)
         self.assertEqual(derived["min_supported"], "30.2")
         self.assertEqual(derived["unverifiable"], ["30.0", "30.1"])
         self.assertEqual(derived["gaps"], [])
 
     def test_a_missing_result_is_unverifiable_too(self):
-        results = {version: ok() for version in GRID if version != "30.0.0"}
-        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        results = grid_results()
+        del results["30.0.0"]
+        derived = obs_compat.derive_range(results, GRID, MAX_TESTED)
         self.assertEqual(derived["min_supported"], "30.1")
         self.assertEqual(derived["unverifiable"], ["30.0"])
 
     def test_the_block_must_reach_the_top_of_the_grid(self):
         # The newest minor failing means we cannot say what the range is at all.
-        results = {version: ok() for version in GRID}
+        results = grid_results()
         results["32.2.0"] = incompatible()
         with self.assertRaises(obs_compat.RangeError):
-            obs_compat.derive_range(results, GRID, "32.2.2")
+            obs_compat.derive_range(results, GRID, MAX_TESTED)
 
     def test_only_failures_below_the_minimum_are_reported(self):
-        results = {version: ok() for version in GRID}
+        results = grid_results()
         results["30.0.0"] = incompatible()
-        derived = obs_compat.derive_range(results, GRID, "32.2.2")
+        derived = obs_compat.derive_range(results, GRID, MAX_TESTED)
         self.assertEqual(derived["min_supported"], "30.1")
         self.assertEqual(derived["gaps"], ["30.0"])
+
+    def test_max_tested_failing_at_obs_build_blocks_the_range(self):
+        # CRITICAL 1: grid[-1] (32.2.0) is not max_tested (32.2.2) -- a later
+        # patch of the same minor. The top of the grid being green must not
+        # paper over max_tested itself being red.
+        results = grid_results()
+        results[MAX_TESTED] = unbuildable()
+        with self.assertRaisesRegex(obs_compat.RangeError, re.escape(MAX_TESTED)):
+            obs_compat.derive_range(results, GRID, MAX_TESTED)
+
+    def test_max_tested_failing_at_plugin_build_blocks_the_range_too(self):
+        # Same as above, but the plugin itself is what failed to build
+        # against max_tested -- an even stronger reason no range naming it
+        # can be declared.
+        results = grid_results()
+        results[MAX_TESTED] = incompatible()
+        with self.assertRaisesRegex(obs_compat.RangeError, re.escape(MAX_TESTED)):
+            obs_compat.derive_range(results, GRID, MAX_TESTED)
+
+    def test_the_declared_minimum_failing_at_obs_build_still_shifts_up(self):
+        # Pin the related path that already works: an unbuildable SDK at the
+        # declared floor becomes unverifiable, not incompatible, and the
+        # minimum moves up past it -- this fix must not disturb that.
+        results = grid_results()
+        results["30.0.0"] = unbuildable()
+        derived = obs_compat.derive_range(results, GRID, MAX_TESTED)
+        self.assertEqual(derived["min_supported"], "30.1")
+        self.assertEqual(derived["unverifiable"], ["30.0"])
+        self.assertEqual(derived["gaps"], [])
 
 
 class Manifest(unittest.TestCase):
@@ -163,9 +214,9 @@ class Manifest(unittest.TestCase):
             self.assertIsNone(obs_compat.load_manifest(Path(tmp) / "obs-compat.json"))
 
     def test_a_saved_manifest_round_trips(self):
-        results = {version: ok() for version in GRID}
+        results = grid_results()
         results["30.0.0"] = unbuildable()
-        built = obs_compat.build_manifest(results, GRID, "32.2.2", None, "2026-08-31")
+        built = obs_compat.build_manifest(results, GRID, MAX_TESTED, None, "2026-08-31")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "obs-compat.json"
             obs_compat.save_manifest(built, path)
@@ -173,7 +224,7 @@ class Manifest(unittest.TestCase):
 
     def test_the_manifest_carries_the_range_and_the_floor_reason(self):
         built = obs_compat.build_manifest(
-            {version: ok() for version in GRID}, GRID, "32.2.2", None, "2026-08-31")
+            grid_results(), GRID, MAX_TESTED, None, "2026-08-31")
         self.assertEqual(built["min_supported"], "30.0")
         self.assertEqual(built["max_tested"], "32.2.2")
         self.assertIsNone(built["beta_tested"])
@@ -182,25 +233,25 @@ class Manifest(unittest.TestCase):
         self.assertIn("obs_frontend_add_dock_by_id", built["floor"]["reason"])
 
     def test_unverifiable_minors_are_kept_out_of_the_gaps(self):
-        results = {version: ok() for version in GRID}
+        results = grid_results()
         results["30.0.0"] = unbuildable()
-        built = obs_compat.build_manifest(results, GRID, "32.2.2", None, "2026-08-31")
+        built = obs_compat.build_manifest(results, GRID, MAX_TESTED, None, "2026-08-31")
         self.assertEqual(built["unverifiable"], ["30.0"])
         self.assertEqual(built["gaps"], [])
         self.assertEqual(built["results"]["30.0.0"]["phase"], "obs-build")
 
     def test_a_qualifying_beta_is_recorded_but_not_in_the_range(self):
-        results = {version: ok() for version in GRID}
+        results = grid_results()
         results["32.3.0-beta1"] = ok()
         built = obs_compat.build_manifest(
-            results, GRID, "32.2.2", "32.3.0-beta1", "2026-08-31")
+            results, GRID, MAX_TESTED, "32.3.0-beta1", "2026-08-31")
         self.assertEqual(built["beta_tested"], "32.3.0-beta1")
         self.assertEqual(built["max_tested"], "32.2.2")
 
 
 def sample_manifest(**overrides) -> dict:
     base = obs_compat.build_manifest(
-        {version: ok() for version in GRID}, GRID, "32.2.2", None, "2026-08-31")
+        grid_results(), GRID, MAX_TESTED, None, "2026-08-31")
     base.update(overrides)
     return base
 
@@ -561,9 +612,17 @@ class Aggregate(unittest.TestCase):
                 else:
                     (folder / f"compat-{version}.json").write_text(
                         json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            # max_tested is probed as its own matrix entry, separate from
+            # GRID's X.Y.0 candidates -- write it too, green, so it does not
+            # itself trip the max_tested-must-be-green gate this test is not
+            # about.
+            extra = root / f"compat-{MAX_TESTED}"
+            extra.mkdir()
+            (extra / f"compat-{MAX_TESTED}.json").write_text(
+                json.dumps({"obs": MAX_TESTED, **ok()}), encoding="utf-8")
             results, skipped = obs_compat.aggregate(root)
             self.assertEqual(len(skipped), 1)
-            derived = obs_compat.derive_range(results, GRID, "32.2.2")
+            derived = obs_compat.derive_range(results, GRID, MAX_TESTED)
             self.assertEqual(derived["unverifiable"], ["30.0"])
             self.assertEqual(derived["gaps"], [])
 
@@ -619,6 +678,13 @@ class ReportMessageWhenDegraded(unittest.TestCase):
                 else:
                     (folder / f"compat-{version}.json").write_text(
                         json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            # max_tested is probed as its own matrix entry, separate from the
+            # grid -- write it too, green, since this test is about a
+            # skipped artifact elsewhere, not about the max_tested gate.
+            extra = artifact_dir / f"compat-{MAX_TESTED}"
+            extra.mkdir()
+            (extra / f"compat-{MAX_TESTED}.json").write_text(
+                json.dumps({"obs": MAX_TESTED, **ok()}), encoding="utf-8")
 
             # Create an initial manifest so check() will find differences
             obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
@@ -629,7 +695,7 @@ class ReportMessageWhenDegraded(unittest.TestCase):
                 import io
                 captured_stderr = io.StringIO()
                 with mock.patch("sys.stderr", captured_stderr):
-                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None, root=root)
+                    exit_code = obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
@@ -672,6 +738,14 @@ class ReportMessageWhenDegraded(unittest.TestCase):
                 else:
                     (folder / f"compat-{version}.json").write_text(
                         json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            # max_tested is probed as its own matrix entry, separate from the
+            # grid -- write it too, green, since this test's obs-build
+            # failure is deliberately at the declared minimum, not at
+            # max_tested.
+            extra = artifact_dir / f"compat-{MAX_TESTED}"
+            extra.mkdir()
+            (extra / f"compat-{MAX_TESTED}.json").write_text(
+                json.dumps({"obs": MAX_TESTED, **ok()}), encoding="utf-8")
 
             # Create an initial manifest so check() will find differences
             obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
@@ -682,7 +756,7 @@ class ReportMessageWhenDegraded(unittest.TestCase):
                 import io
                 captured_stderr = io.StringIO()
                 with mock.patch("sys.stderr", captured_stderr):
-                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None, root=root)
+                    exit_code = obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
@@ -696,6 +770,10 @@ class ReportMessageWhenDegraded(unittest.TestCase):
             written = obs_compat.load_manifest(root / "obs-compat.json")
             self.assertEqual(written["results"]["30.0.0"]["phase"], "obs-build")
             self.assertEqual(written["unverifiable"], ["30.0"])
+            # Pin the behaviour this fix must not disturb: the declared
+            # minimum failing at obs-build still exits 2 (EXIT_STALE), and
+            # the range genuinely shifts up past it rather than staying put.
+            self.assertEqual(written["min_supported"], "30.1")
 
     def test_report_fully_green_stale_run_claims_probes_are_green(self):
         # When all probes succeeded and nothing was skipped, the original message is used.
@@ -717,6 +795,12 @@ class ReportMessageWhenDegraded(unittest.TestCase):
                 folder.mkdir()
                 (folder / f"compat-{version}.json").write_text(
                     json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            # max_tested is probed as its own matrix entry, separate from the
+            # grid -- write it too, green, since this is the fully-green case.
+            extra = artifact_dir / f"compat-{MAX_TESTED}"
+            extra.mkdir()
+            (extra / f"compat-{MAX_TESTED}.json").write_text(
+                json.dumps({"obs": MAX_TESTED, **ok()}), encoding="utf-8")
 
             # Create an initial manifest so check() will find differences
             obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
@@ -727,7 +811,7 @@ class ReportMessageWhenDegraded(unittest.TestCase):
                 import io
                 captured_stderr = io.StringIO()
                 with mock.patch("sys.stderr", captured_stderr):
-                    exit_code = obs_compat._report(artifact_dir, GRID, "32.2.2", None, root=root)
+                    exit_code = obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
 
             self.assertEqual(exit_code, obs_compat.EXIT_STALE)
             stderr = captured_stderr.getvalue()
@@ -775,6 +859,14 @@ class ReportDegradesAnUnencodableSummaryInsteadOfDroppingIt(unittest.TestCase):
                 folder.mkdir()
                 (folder / f"compat-{version}.json").write_text(
                     json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            # max_tested is probed as its own matrix entry, separate from
+            # the grid -- write it too, green, so build_manifest can derive
+            # a range at all; this test is about the print() fallback, not
+            # about the max_tested gate.
+            extra = artifact_dir / f"compat-{MAX_TESTED}"
+            extra.mkdir()
+            (extra / f"compat-{MAX_TESTED}.json").write_text(
+                json.dumps({"obs": MAX_TESTED, **ok()}), encoding="utf-8")
 
             import io
 
@@ -804,7 +896,7 @@ class ReportDegradesAnUnencodableSummaryInsteadOfDroppingIt(unittest.TestCase):
                 os.environ.pop("GITHUB_STEP_SUMMARY", None)
                 with mock.patch("sys.stdout", fake_stdout):
                     with mock.patch("sys.stderr", io.StringIO()):
-                        obs_compat._report(artifact_dir, GRID, "32.2.2", None, root=root)
+                        obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
 
             written = fake_stdout.buffer.getvalue().decode("cp1252")
             # Every row reached the operator -- the whole table survived,
@@ -816,6 +908,113 @@ class ReportDegradesAnUnencodableSummaryInsteadOfDroppingIt(unittest.TestCase):
             # rather than the row (or the whole print) being dropped.
             self.assertNotIn("✅", written)
             self.assertGreaterEqual(written.count("?"), len(GRID))
+
+
+class ReportGateChecksMaxTestedItself(unittest.TestCase):
+    """CRITICAL 1, at the --report boundary: grid[-1] (32.2.0) is not
+    max_tested (32.2.2) whenever a later patch of the newest minor has
+    shipped, and it is max_tested -- not grid[-1] -- that build_matrix marks
+    `required` and that the README calls "Built against". A required probe
+    failing at max_tested must block the release, not slip through because
+    the grid's own top happened to be green.
+    """
+
+    def _artifact_dir(self, root: Path, max_tested_result: dict) -> Path:
+        artifact_dir = root / "compat-artifacts"
+        artifact_dir.mkdir()
+        for version in GRID:
+            folder = artifact_dir / f"compat-{version}"
+            folder.mkdir()
+            (folder / f"compat-{version}.json").write_text(
+                json.dumps({"obs": version, **ok()}), encoding="utf-8")
+        extra = artifact_dir / f"compat-{MAX_TESTED}"
+        extra.mkdir()
+        (extra / f"compat-{MAX_TESTED}.json").write_text(
+            json.dumps({"obs": MAX_TESTED, **max_tested_result}), encoding="utf-8")
+        return artifact_dir
+
+    def test_max_tested_failing_at_obs_build_is_not_exit_ok(self):
+        # Reproduces the bug report: 32.2.0 (top of the grid) green, 32.2.2
+        # (max_tested, required) red at obs-build. The old code exited 0.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            artifact_dir = self._artifact_dir(root, unbuildable())
+            import io
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr):
+                exit_code = obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
+            self.assertEqual(exit_code, obs_compat.EXIT_NO_RANGE)
+            self.assertIn(MAX_TESTED, stderr.getvalue())
+
+    def test_max_tested_failing_at_plugin_build_is_not_exit_ok(self):
+        # Same gap, but the plugin itself is what failed against max_tested
+        # -- still not a version whose successful build can be declared.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            artifact_dir = self._artifact_dir(root, incompatible())
+            import io
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr):
+                exit_code = obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
+            self.assertEqual(exit_code, obs_compat.EXIT_NO_RANGE)
+            self.assertIn(MAX_TESTED, stderr.getvalue())
+
+
+class ReportExcludesTheBetaFromTheGate(unittest.TestCase):
+    """CRITICAL 2: a beta is probed for forward-looking information only. It
+    is never in the declared range, never `required`, and the workflow
+    already lets its own job fail without failing the run (continue-on-error
+    is keyed off `required`). --report must not fail the whole run on a
+    beta's behalf -- but its failure must still show up in the manifest and
+    the summary table, since that is the entire point of probing it.
+    """
+
+    BETA = "32.3.0-beta1"
+
+    def test_a_beta_broken_at_plugin_build_does_not_block_the_release(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                f'env:\n  OBS_VERSION: "{MAX_TESTED}"\n', encoding="utf-8")
+            # Empty between the markers: --report will compute a manifest
+            # that includes a beta row, so this deliberately leaves README
+            # stale. That is fine -- the only claim this test makes is about
+            # the exit code not being EXIT_INCOMPATIBLE, and about what ends
+            # up in the manifest and the summary.
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\n"
+                f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+
+            artifact_dir = root / "compat-artifacts"
+            artifact_dir.mkdir()
+            for version in GRID + [MAX_TESTED]:
+                folder = artifact_dir / f"compat-{version}"
+                folder.mkdir()
+                (folder / f"compat-{version}.json").write_text(
+                    json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            beta_folder = artifact_dir / f"compat-{self.BETA}"
+            beta_folder.mkdir()
+            (beta_folder / f"compat-{self.BETA}.json").write_text(
+                json.dumps({"obs": self.BETA, **incompatible()}), encoding="utf-8")
+
+            summary_file = root / "summary.txt"
+            with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+                import io
+                stderr = io.StringIO()
+                with mock.patch("sys.stderr", stderr):
+                    exit_code = obs_compat._report(
+                        artifact_dir, GRID, MAX_TESTED, self.BETA, root=root)
+
+            # Must not read as an incompatibility on the beta's behalf.
+            self.assertNotEqual(exit_code, obs_compat.EXIT_INCOMPATIBLE)
+            self.assertNotIn("does not build against", stderr.getvalue())
+
+            # But the beta's failure is still recorded, not silently dropped.
+            written = obs_compat.load_manifest(root / "obs-compat.json")
+            self.assertEqual(written["results"][self.BETA]["phase"], "plugin-build")
+            self.assertEqual(written["beta_tested"], self.BETA)
+            self.assertIn(self.BETA, summary_file.read_text(encoding="utf-8"))
 
 
 class ReportRequiresItsArguments(unittest.TestCase):

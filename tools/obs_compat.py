@@ -128,6 +128,10 @@ def derive_range(results: dict[str, dict], grid: list[str], max_tested: str) -> 
     "30.0+" is a lie to everyone running 30.1. So the block is walked down from
     the newest minor and stops at the first candidate that is not green,
     whatever the reason.
+
+    Reaching the top of the grid is necessary but not sufficient: the range
+    this function returns is only as defensible as max_tested itself, which
+    must independently be green -- see the check below.
     """
     if not grid:
         raise RangeError("the version grid is empty")
@@ -137,6 +141,21 @@ def derive_range(results: dict[str, dict], grid: list[str], max_tested: str) -> 
         raise RangeError(
             f"the newest probed minor ({newest}) is not green, so no range "
             f"can be declared against {max_tested}"
+        )
+
+    # grid[-1] is the newest minor's first patch (X.Y.0), not necessarily
+    # max_tested: build_matrix probes max_tested as a separate candidate
+    # whenever a later patch of that minor has shipped (32.2.0 vs 32.2.2),
+    # and it is max_tested -- not grid[-1] -- that is marked `required`, that
+    # the README calls "Built against", and that this function is about to
+    # name as the top of the declared range. The grid reaching its top green
+    # says nothing about that specific tag; only checking it directly does.
+    # Without this, a required probe could fail here without ever tripping
+    # this function, and the range would still get declared against it.
+    if results.get(max_tested, {}).get("status") != "ok":
+        raise RangeError(
+            f"max_tested ({max_tested}) is not green, so the range cannot "
+            f"be declared without it"
         )
 
     index = len(grid) - 1
@@ -503,8 +522,14 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None,
     manifest is read from and written to is to pass the path down here.
     """
     results, skipped = aggregate(artifact_dir)
+    # The beta is probed for forward-looking information only: it is never
+    # in the declared range, never `required`, and the workflow already lets
+    # its own job fail without failing the run (continue-on-error is keyed
+    # off `required`). Gating the exit code on it here would fail the whole
+    # run on a prerelease's behalf -- its failure still belongs in `results`
+    # and the summary table, just not in this list.
     broken = [version for version, result in results.items()
-              if result.get("phase") == "plugin-build"]
+              if version != beta and result.get("phase") == "plugin-build"]
     try:
         manifest = build_manifest(results, grid, latest, beta,
                                   datetime.date.today().isoformat())
