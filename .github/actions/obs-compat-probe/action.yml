@@ -112,12 +112,24 @@ runs:
       if: always()
       shell: bash
       run: |
-        if [ "${{ steps.obs-verify.outputs.status }}" = "fail" ]; then
-          status=fail; phase=obs-build
-        elif [ "${{ steps.plugin.outputs.status }}" = "fail" ]; then
-          status=fail; phase=plugin-build
-        else
+        # status is "ok" only when both checks actually reported ok --
+        # never as a fallthrough default. An empty output is not evidence
+        # of anything: it means the step that would have set it never ran
+        # at all (e.g. "Cache OBS dev" hard-failing as an Actions step
+        # skips every following non-always() step, leaving both outputs
+        # empty), and a probe that never ran anything must not report the
+        # same green as one that actually verified something. Do not
+        # "simplify" this back to an else-is-ok default.
+        if [ "${{ steps.obs-verify.outputs.status }}" = "ok" ] && [ "${{ steps.plugin.outputs.status }}" = "ok" ]; then
           status=ok; phase=null
+        elif [ "${{ steps.obs-verify.outputs.status }}" != "ok" ]; then
+          # Covers both an explicit obs-verify failure and obs-verify never
+          # having run at all. Either way we did not get an SDK we could
+          # verify, so nothing has been learned about the plugin -- this
+          # can never be misreported as a plugin-build finding.
+          status=fail; phase=obs-build
+        else
+          status=fail; phase=plugin-build
         fi
         printf '{"obs":"%s","status":"%s","phase":%s,"env":"%s"}\n' \
           "${{ inputs.obs-version }}" "$status" \
@@ -140,5 +152,9 @@ runs:
       if: always()
       shell: bash
       run: |
-        [ "${{ steps.obs-verify.outputs.status }}" != "fail" ] || exit 1
-        [ "${{ steps.plugin.outputs.status }}" != "fail" ] || exit 1
+        # Must agree with "Record the outcome": ok is earned, not assumed,
+        # so failure here is triggered by "not literally ok" rather than
+        # "literally fail" -- an empty (never ran) status fails this step
+        # too, matching the fail status/obs-build phase already recorded.
+        [ "${{ steps.obs-verify.outputs.status }}" = "ok" ] || exit 1
+        [ "${{ steps.plugin.outputs.status }}" = "ok" ] || exit 1
