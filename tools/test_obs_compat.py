@@ -1115,6 +1115,48 @@ class ReportExcludesTheBetaFromTheGate(unittest.TestCase):
             self.assertNotIn("Also builds against", rendered)
 
 
+class ReportExitsCleanWhenEverythingAlreadyMatches(unittest.TestCase):
+    """I4: every other _report test in this file asserts 2, 3, 1 or 4 --
+    the gate is proven to block and never proven to pass. A regression
+    making _report always return non-zero would keep every one of those
+    tests green while making every release silently unpublishable.
+    """
+
+    def test_a_fully_green_run_that_already_matches_the_readme_exits_ok(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                f'env:\n  OBS_VERSION: "{MAX_TESTED}"\n', encoding="utf-8")
+
+            manifest = obs_compat.build_manifest(
+                grid_results(), GRID, MAX_TESTED, None, "2026-08-31")
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\n"
+                f"{obs_compat.render_readme_section(manifest)}\n"
+                f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+
+            artifact_dir = root / "compat-artifacts"
+            artifact_dir.mkdir()
+            for version in GRID + [MAX_TESTED]:
+                folder = artifact_dir / f"compat-{version}"
+                folder.mkdir()
+                (folder / f"compat-{version}.json").write_text(
+                    json.dumps({"obs": version, **ok()}), encoding="utf-8")
+
+            summary_file = root / "summary.txt"
+            with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_file)}):
+                import io
+                stderr = io.StringIO()
+                with mock.patch("sys.stderr", stderr):
+                    exit_code = obs_compat._report(
+                        artifact_dir, GRID, MAX_TESTED, None, root=root)
+
+            self.assertEqual(exit_code, obs_compat.EXIT_OK)
+            # Nothing to report: no ::error::, no ::notice::, no complaint.
+            self.assertEqual(stderr.getvalue(), "")
+
+
 class ReportRequiresItsArguments(unittest.TestCase):
     # Exit 1 is reserved for a genuine incompatibility; malformed CLI input
     # must never fall through argparse/json.loads into Python's default
