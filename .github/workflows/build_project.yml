@@ -30,6 +30,16 @@ permissions:
 env:
   OBS_VERSION: "32.2.2"
   OBS_DEPS_VERSION: "2025-08-23"
+  # The macOS version the shipped plugin actually supports. Pinned, not left to
+  # default, because CMake otherwise targets whatever the runner happens to be
+  # running: the binary's real minimum used to follow the runner image while the
+  # bundle's Info.plist claimed 11.0, so the package promised macOS versions it
+  # could not run on. 13.0 is what OBS 32.2 itself targets
+  # (CMakePresets.json: CMAKE_OSX_DEPLOYMENT_TARGET), and the plugin links
+  # against those libraries, so it cannot honestly claim to support less.
+  # This one value feeds both cmake invocations and LSMinimumSystemVersion, so
+  # the binary and the manifest cannot disagree again.
+  MACOS_DEPLOYMENT_TARGET: "13.0"
 
 jobs:
   tests:
@@ -209,7 +219,11 @@ jobs:
   macos:
     name: macOS universal
     needs: tests
-    runs-on: macos-15
+    # macos-26, not macos-15: OBS 32.2's build refuses an SDK older than macOS
+    # 26.5 ("Your macOS SDK version is too low"), and macos-15 ships 15.5. The
+    # image is pinned rather than left at macos-latest so a runner-image
+    # rotation cannot silently change what the shipped binary is built against.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install dependencies
@@ -244,7 +258,11 @@ jobs:
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: /tmp/obs-dev
-          key: obsdev-mac-universal-${{ env.OBS_VERSION }}-v1
+          # The deployment target is part of the key: a prefix built for an
+          # older minimum (or on the previous runner image, which had no
+          # explicit target at all) must never be restored into a build that
+          # promises a different one.
+          key: obsdev-mac-universal-${{ env.OBS_VERSION }}-${{ env.MACOS_DEPLOYMENT_TARGET }}-v2
       - name: Clone OBS source
         if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: |
@@ -265,6 +283,7 @@ jobs:
             -DENABLE_BROWSER=OFF \
             -DENABLE_VLC=OFF \
             -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${{ env.MACOS_DEPLOYMENT_TARGET }}" \
             -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
             -DCMAKE_PREFIX_PATH="/tmp/obs-deps-qt6;/tmp/obs-deps"
       - name: Build OBS
@@ -280,6 +299,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTS=OFF \
             -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${{ env.MACOS_DEPLOYMENT_TARGET }}" \
             -Dlibobs_DIR="/tmp/obs-dev/Frameworks/libobs.framework/Resources/cmake" \
             -Dobs-frontend-api_DIR="/tmp/obs-dev/lib/cmake/obs-frontend-api" \
             -DQt6_DIR="/tmp/obs-deps-qt6/lib/cmake/Qt6" \
@@ -323,7 +343,7 @@ jobs:
             <key>CFBundlePackageType</key><string>BNDL</string>
             <key>CFBundleShortVersionString</key><string>${version}</string>
             <key>CFBundleVersion</key><string>${version}</string>
-            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>LSMinimumSystemVersion</key><string>${{ env.MACOS_DEPLOYMENT_TARGET }}</string>
           </dict>
           </plist>
           PLIST
