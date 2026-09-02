@@ -82,15 +82,26 @@ runs:
         fi
         # A green install (or a cache hit) is not evidence anything is
         # actually there: an unrecognized --component silently installs
-        # nothing and still exits 0. The only proof that counts is the
-        # header the plugin actually needs, found on disk under its own
-        # name — never a pipeline's exit code, which is exactly what let a
-        # broken prefix report success before.
-        found="$(find /tmp/obs-dev -type f -name obs-frontend-api.h -print -quit)"
-        if [ -n "$found" ]; then
+        # nothing and still exits 0. The only proof that counts is files the
+        # plugin actually needs, found on disk under their own names — never
+        # a pipeline's exit code, which is exactly what let a broken prefix
+        # report success before.
+        #
+        # The header alone is not enough either: the plugin's own CMakeLists
+        # does find_package(obs-frontend-api REQUIRED), and a prefix that has
+        # headers but no CMake package config fails that CONFIGURE step, not
+        # the compile. Without this second check, that configure failure is
+        # recorded by "Build the plugin against it" as phase=plugin-build --
+        # obs-build wearing the plugin-build label, one level deeper than the
+        # header check already closed, and it would stick: the cache key
+        # never changes, so an incomplete prefix would be served forever.
+        header="$(find /tmp/obs-dev -type f -name obs-frontend-api.h -print -quit)"
+        package_config="$(find /tmp/obs-dev -type f -name 'obs-frontend-apiConfig.cmake' -print -quit)"
+        if [ -n "$header" ] && [ -n "$package_config" ]; then
           echo "status=ok" >> "$GITHUB_OUTPUT"
         else
-          echo "::warning::obs-frontend-api.h not found under /tmp/obs-dev; treating as an obs-build failure"
+          [ -n "$header" ] || echo "::warning::obs-frontend-api.h not found under /tmp/obs-dev; treating as an obs-build failure"
+          [ -n "$package_config" ] || echo "::warning::obs-frontend-api CMake package config not found under /tmp/obs-dev; treating as an obs-build failure"
           echo "status=fail" >> "$GITHUB_OUTPUT"
         fi
 
@@ -102,8 +113,12 @@ runs:
         set -o pipefail
         status=ok
         {
+          # && rather than two statements, for the same reason as "Build OBS
+          # dev" above: set -e does not apply inside this group (it is stage
+          # one of a pipe into tail), so only && stops a failing configure
+          # from letting the build step's own exit code paper over it.
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF \
-            -DCMAKE_PREFIX_PATH="/tmp/obs-dev;/usr"
+            -DCMAKE_PREFIX_PATH="/tmp/obs-dev;/usr" &&
           cmake --build build
         } 2>&1 | tail -200 || status=fail
         echo "status=$status" >> "$GITHUB_OUTPUT"
