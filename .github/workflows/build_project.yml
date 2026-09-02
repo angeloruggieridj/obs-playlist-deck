@@ -591,6 +591,14 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: release-assets
+          # Without this, a tag push also pulls in the ten compat-probe JSON
+          # artifacts (compat-*, obs-compat-manifest) alongside the actual
+          # packages. They are not release assets, but merge-multiple with no
+          # pattern cannot tell the difference -- they landed in
+          # release-assets/ and were signed into the build-provenance
+          # attestation below via subject-path: release-assets/*, silently
+          # changing what that attestation's subject set means.
+          pattern: obs-playlist-deck-*
           merge-multiple: true
       # The release body is this version's CHANGELOG section, not GitHub's
       # auto-generated commit list.
