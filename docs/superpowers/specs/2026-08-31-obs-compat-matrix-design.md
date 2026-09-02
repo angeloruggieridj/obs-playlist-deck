@@ -135,6 +135,27 @@ served to container jobs.
 
 ## CI topology
 
+> **Superseded by implementation (2026-09-02).** Two statements below no
+> longer match `.github/workflows/build_project.yml`, and are left as
+> written — with this note — rather than edited, so a reader who diffs this
+> file against the workflow is not chasing a moving target:
+>
+> 1. `compat-discover` has no `needs:` at all, not even on `tests`. An
+>    earlier iteration gave it `needs: tests`, which deadlocked the very
+>    first run: with no `obs-compat.json` yet, `tests`' own `--check` step
+>    fails, and GitHub Actions skips every job downstream of a failed
+>    dependency regardless of that job's own `if:` — so the pipeline could
+>    never produce the manifest its own gate requires (see run 33595508885,
+>    and the 18-line comment on `compat-discover` in the workflow). The
+>    rejected alternative, softening `tests`' `--check` to tolerate a missing
+>    manifest, would also let a *deleted* manifest pass silently, which this
+>    project spent nine tasks removing exactly that kind of silence to avoid.
+> 2. "Only those two can break the workflow" (below) is no longer true.
+>    `_report`'s `broken` list fails the run (`EXIT_INCOMPATIBLE`) on *any*
+>    non-beta candidate that fails at `plugin-build`, required or not — a
+>    minor probed only to be measured, per the very next sentence, still
+>    breaks the workflow if the plugin does not compile against it.
+
 ```
 compat-discover      cheap; resolves grid, outputs matrix + run_full
       |

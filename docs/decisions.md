@@ -218,7 +218,7 @@ component name is confirmed for 30.0.0 only — any other pre-31.x tag must be
 checked against its own `cmake/Modules/ObsHelpers.cmake` before assuming
 `obs_libraries` still applies.
 
-## The supported OBS range is derived, not declared (2026-09-02)
+## 16. The supported OBS range is derived, not declared (2026-09-02)
 
 The compat job tested a hard-coded version pair while the README claimed a
 range by hand and OBS_VERSION named a third number. Nothing kept them in
