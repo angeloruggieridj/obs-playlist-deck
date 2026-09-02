@@ -74,6 +74,34 @@ with the comment updated.
 - Read [docs/decisions.md](docs/decisions.md) before undoing something that
   looks arbitrary — most of it was paid for with a bug.
 
+## Updating the compatibility declaration
+
+`obs-compat.json`, the README's Compatibility table and `build_project.yml`'s
+`OBS_VERSION` are three statements about the same evidence, kept honest by
+`tools/obs_compat.py --check` in CI. The evidence itself — which OBS SDKs the
+plugin actually compiled against — only comes from the `compat-report` job in
+`build_project.yml`, which runs on a tag push, a manual dispatch, or the
+weekly schedule. Nothing in that job commits its result; it only uploads it.
+
+When `compat-report` fails (or you want to pull in evidence it produced on a
+green run), update the declaration locally:
+
+1. Open the failed (or latest) `compat-report` run on GitHub Actions and
+   download its `obs-compat-manifest` artifact.
+2. Replace the repository's `obs-compat.json` with the downloaded file.
+3. Run `python tools/obs_compat.py --write` and commit both files.
+
+Running `--write` before step 1 is a no-op: it renders from whatever
+`obs-compat.json` is already on disk, which is still the old, committed
+manifest until step 1 replaces it — and `--check` was already passing
+against that same old manifest, so nothing will appear to be wrong locally.
+
+A `compat-report` run that fails because no range could be derived at all
+(`EXIT_NO_RANGE` — the newest probed OBS minor is not green) never writes a
+fresh manifest, so its `obs-compat-manifest` artifact is empty rather than a
+stale copy of the committed file; see what the run actually reported before
+following the steps above.
+
 ## Translations
 
 Add or fix a language in `tools/locales.json`, run

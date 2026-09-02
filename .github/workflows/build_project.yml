@@ -502,6 +502,15 @@ jobs:
         with:
           path: compat-artifacts
           pattern: compat-*
+      # --report only ever writes a fresh obs-compat.json when it can derive
+      # a range (see save_manifest in _report). On EXIT_NO_RANGE it returns
+      # before that write, and checkout above left the *committed* manifest
+      # sitting at this same path -- indistinguishable, to the upload step
+      # below, from a genuinely fresh one. Removing it first means a
+      # no-range run uploads nothing rather than a stale file that looks
+      # current: "no files were found" in the log instead of a silent lie.
+      - name: Remove the committed manifest so a no-range run cannot pass it off as fresh
+        run: rm -f obs-compat.json
       - name: Derive the supported range
         run: |
           python3 tools/obs_compat.py --report \
@@ -509,12 +518,16 @@ jobs:
             --grid '${{ needs.compat-discover.outputs.grid }}' \
             --latest-stable '${{ needs.compat-discover.outputs.latest_stable }}' \
             --beta '${{ needs.compat-discover.outputs.beta }}'
+      # See tools/obs_compat.py's UPDATE_INSTRUCTIONS for the three steps a
+      # human needs after a non-zero exit here: this artifact is what step 1
+      # downloads. It is absent, not stale, when the step above didn't run.
       - name: Upload the manifest as it would be written
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: obs-compat-manifest
           path: obs-compat.json
+          if-no-files-found: warn
 
   # Stream Deck companion packaging: installable zip + Elgato .streamDeckPlugin,
   # published as public release assets.

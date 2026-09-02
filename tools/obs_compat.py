@@ -541,6 +541,22 @@ def _discover() -> int:
     return EXIT_OK
 
 
+# The three steps in order, because "run --write" on its own sent operators
+# down a dead end: --write renders from the LOCAL obs-compat.json, which on
+# their machine is still the old one, so it is a no-op and their local
+# --check already passes. Nothing commits the manifest _report just wrote on
+# the runner -- it only lands in the uploaded artifact -- so step 1 has to
+# happen before --write does anything at all.
+UPDATE_INSTRUCTIONS = (
+    "To update the compatibility declaration: (1) download this run's "
+    "'obs-compat-manifest' artifact and save it as obs-compat.json at the "
+    "repository root, overwriting the committed copy; (2) run: "
+    "python3 tools/obs_compat.py --write; (3) commit both files. Running "
+    "--write against your local obs-compat.json first is a no-op -- it is "
+    "still the old manifest until step 1 replaces it."
+)
+
+
 def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None,
            root: Path = ROOT) -> int:
     """`root` is threaded through to save_manifest()/check() explicitly.
@@ -621,12 +637,12 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None,
                 reasons.append(f"the beta ({beta}) failed to build")
             print(f"::notice::compatibility matrix check failed: {'; '.join(reasons)}. "
                   f"The supported range may not have genuinely moved — inspect "
-                  f"--artifacts and re-run before running "
-                  f"python3 tools/obs_compat.py --write", file=sys.stderr)
+                  f"--artifacts and re-run before updating the declaration. "
+                  f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
         else:
             # All probes succeeded and check found problems → range simply moved.
-            print("::notice::every probe is green — the declared range simply moved. "
-                  "Run: python3 tools/obs_compat.py --write", file=sys.stderr)
+            print(f"::notice::every probe is green — the declared range simply moved. "
+                  f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
         return EXIT_STALE
     return EXIT_OK
 
