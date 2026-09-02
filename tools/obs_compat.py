@@ -250,8 +250,17 @@ def render_readme_section(manifest: dict) -> str:
          "Compile and link against each version's OBS SDK in CI — not a runtime test."),
         ("Built against", manifest["max_tested"]),
     ]
-    if manifest.get("beta_tested"):
-        rows.append(("Also builds against", f"{manifest['beta_tested']} (prerelease, not supported)"))
+    beta = manifest.get("beta_tested")
+    # beta_tested records what was *measured* -- red or green, see
+    # build_manifest -- because needs_full_run needs to know a beta was
+    # probed at all, not just that it passed. But advertising "also builds
+    # against" here is a claim, and the only evidence that can back it is the
+    # beta's own probe result. Rendering the row off beta_tested's mere
+    # presence let a beta that failed at plugin-build be advertised as
+    # something this plugin builds against, contradicted by this same
+    # manifest's `results` two keys away.
+    if beta and manifest.get("results", {}).get(beta, {}).get("status") == "ok":
+        rows.append(("Also builds against", f"{beta} (prerelease, not supported)"))
     if manifest.get("unverifiable"):
         rows.append(("Not verifiable in CI", ", ".join(manifest["unverifiable"])))
     rows.extend(STATIC_ROWS)
@@ -586,10 +595,15 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None,
         # Determine if any probe failed at obs-build (SDK build failure).
         obs_build_failures = [version for version, result in results.items()
                                if result.get("phase") == "obs-build"]
-        if skipped or obs_build_failures:
+        # A beta that failed is not "every probe is green" either -- its
+        # result is real evidence and its absence from the declared range is
+        # by design, but the message must not claim a clean sweep while
+        # holding a fail/plugin-build record for it.
+        beta_failed = beta is not None and results.get(beta, {}).get("status") != "ok"
+        if skipped or obs_build_failures or beta_failed:
             # Do not claim every probe was green; some evidence is missing or
             # failed for a reason other than the plugin. Name whichever of
-            # the two actually occurred rather than a fixed sentence that
+            # the three actually occurred rather than a fixed sentence that
             # would point at a zero count or at ::warning:: lines that were
             # never printed.
             reasons = []
@@ -599,6 +613,8 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None,
             if obs_build_failures:
                 reasons.append(f"the OBS SDK failed to build for "
                                 f"{', '.join(sorted(obs_build_failures))}")
+            if beta_failed:
+                reasons.append(f"the beta ({beta}) failed to build")
             print(f"::notice::compatibility matrix check failed: {'; '.join(reasons)}. "
                   f"The supported range may not have genuinely moved — inspect "
                   f"--artifacts and re-run before running "

@@ -283,9 +283,37 @@ class ReadmeRendering(unittest.TestCase):
         self.assertNotIn("Not verifiable", obs_compat.render_readme_section(sample_manifest()))
 
     def test_a_beta_gets_its_own_row_and_stays_out_of_the_range(self):
-        body = obs_compat.render_readme_section(sample_manifest(beta_tested="32.3.0-beta1"))
+        # A row is only earned by the beta's own probe result -- see the two
+        # tests directly below -- so this one must supply a matching green
+        # `results` entry rather than just setting `beta_tested` on its own,
+        # which is not a shape production ever produces (build_manifest
+        # always records a `results` entry for whatever it probed).
+        results = grid_results()
+        results["32.3.0-beta1"] = ok()
+        body = obs_compat.render_readme_section(
+            sample_manifest(beta_tested="32.3.0-beta1", results=results))
         self.assertIn("32.3.0-beta1", body)
         self.assertIn("**30.0 – 32.2.2**", body)
+
+    def test_no_beta_row_when_the_beta_failed_at_plugin_build(self):
+        # CRITICAL 1: a red beta must never be advertised as something this
+        # plugin "also builds against" -- that claim would contradict the
+        # same manifest's own `results` entry for it.
+        results = grid_results()
+        results["32.3.0-beta1"] = incompatible()
+        body = obs_compat.render_readme_section(
+            sample_manifest(beta_tested="32.3.0-beta1", results=results))
+        self.assertNotIn("32.3.0-beta1", body)
+        self.assertNotIn("Also builds against", body)
+
+    def test_no_beta_row_when_the_beta_has_no_result_at_all(self):
+        # beta_tested set but no matching results entry (an artifact that
+        # never reported) is exactly as unproven as a red one -- absence of
+        # evidence is not evidence of "ok", so this must not render either.
+        body = obs_compat.render_readme_section(
+            sample_manifest(beta_tested="32.3.0-beta1"))
+        self.assertNotIn("32.3.0-beta1", body)
+        self.assertNotIn("Also builds against", body)
 
     def test_the_static_rows_survive_generation(self):
         body = obs_compat.render_readme_section(sample_manifest())
@@ -986,18 +1014,30 @@ class ReportExcludesTheBetaFromTheGate(unittest.TestCase):
     BETA = "32.3.0-beta1"
 
     def test_a_beta_broken_at_plugin_build_does_not_block_the_release(self):
+        # CRITICAL 1: this pins the fix, not the defect it replaced. The old
+        # version of this test left the README empty between the markers --
+        # guaranteed stale no matter what --report computed -- then asserted
+        # only that the exit code was not EXIT_INCOMPATIBLE. That passed
+        # even though the run still returned EXIT_STALE and the release was
+        # still skipped: the test's name claimed more than its assertions
+        # checked. Here the README is seeded with exactly what a red,
+        # unadvertised beta renders to (render_readme_section omits the beta
+        # row unless its own result is green), so nothing is stale and
+        # EXIT_OK -- not merely "not EXIT_INCOMPATIBLE" -- is the only way
+        # this test can pass.
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             (root / ".github" / "workflows").mkdir(parents=True)
             (root / ".github" / "workflows" / "build_project.yml").write_text(
                 f'env:\n  OBS_VERSION: "{MAX_TESTED}"\n', encoding="utf-8")
-            # Empty between the markers: --report will compute a manifest
-            # that includes a beta row, so this deliberately leaves README
-            # stale. That is fine -- the only claim this test makes is about
-            # the exit code not being EXIT_INCOMPATIBLE, and about what ends
-            # up in the manifest and the summary.
+
+            # What a red beta renders to: no beta row at all -- indistinguishable
+            # from a manifest that was never given a beta to begin with.
+            expected_manifest = obs_compat.build_manifest(
+                grid_results(), GRID, MAX_TESTED, None, "2026-08-31")
             (root / "README.md").write_text(
                 f"## Compatibility\n\n{obs_compat.README_START}\n"
+                f"{obs_compat.render_readme_section(expected_manifest)}\n"
                 f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
 
             artifact_dir = root / "compat-artifacts"
@@ -1020,15 +1060,59 @@ class ReportExcludesTheBetaFromTheGate(unittest.TestCase):
                     exit_code = obs_compat._report(
                         artifact_dir, GRID, MAX_TESTED, self.BETA, root=root)
 
-            # Must not read as an incompatibility on the beta's behalf.
-            self.assertNotEqual(exit_code, obs_compat.EXIT_INCOMPATIBLE)
+            # The literal claim in this test's name: a red beta does not
+            # block the release. EXIT_OK, not just "not EXIT_INCOMPATIBLE".
+            self.assertEqual(exit_code, obs_compat.EXIT_OK)
             self.assertNotIn("does not build against", stderr.getvalue())
 
-            # But the beta's failure is still recorded, not silently dropped.
+            # But the beta's failure is still recorded, not silently
+            # dropped -- needs_full_run compares beta_tested against the
+            # newly discovered beta on every daily watch, and dropping a red
+            # result here would make that comparison re-fire the full matrix
+            # every single day forever.
             written = obs_compat.load_manifest(root / "obs-compat.json")
             self.assertEqual(written["results"][self.BETA]["phase"], "plugin-build")
             self.assertEqual(written["beta_tested"], self.BETA)
             self.assertIn(self.BETA, summary_file.read_text(encoding="utf-8"))
+
+    def test_the_readme_does_not_advertise_a_red_beta(self):
+        # The other half of CRITICAL 1: even when the README genuinely needs
+        # rewriting for an unrelated reason (here: it is empty between the
+        # markers), the freshly-written manifest must never let a red beta's
+        # mere presence render an "Also builds against" claim the same
+        # manifest's own results contradict.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                f'env:\n  OBS_VERSION: "{MAX_TESTED}"\n', encoding="utf-8")
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\n"
+                f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+
+            artifact_dir = root / "compat-artifacts"
+            artifact_dir.mkdir()
+            for version in GRID + [MAX_TESTED]:
+                folder = artifact_dir / f"compat-{version}"
+                folder.mkdir()
+                (folder / f"compat-{version}.json").write_text(
+                    json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            beta_folder = artifact_dir / f"compat-{self.BETA}"
+            beta_folder.mkdir()
+            (beta_folder / f"compat-{self.BETA}.json").write_text(
+                json.dumps({"obs": self.BETA, **incompatible()}), encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+                import io
+                with mock.patch("sys.stdout", io.StringIO()), \
+                     mock.patch("sys.stderr", io.StringIO()):
+                    obs_compat._report(artifact_dir, GRID, MAX_TESTED, self.BETA, root=root)
+
+            written = obs_compat.load_manifest(root / "obs-compat.json")
+            rendered = obs_compat.render_readme_section(written)
+            self.assertNotIn(self.BETA, rendered)
+            self.assertNotIn("Also builds against", rendered)
 
 
 class ReportRequiresItsArguments(unittest.TestCase):
