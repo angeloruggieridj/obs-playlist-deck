@@ -378,7 +378,22 @@ jobs:
   # is generated from. See docs/superpowers/specs/2026-08-31-obs-compat-matrix-design.md
   compat-discover:
     name: OBS compat — discover
-    needs: tests
+    # No `needs: tests` here, deliberately. This job answers a question about
+    # OBS SDK compatibility, which does not depend on the plugin's unit tests
+    # passing — and on the first-ever run there is no obs-compat.json yet, so
+    # `tests --check` fails, and GitHub Actions skips every job downstream of
+    # a failed dependency regardless of that job's own `if:`. A `needs: tests`
+    # here made the pipeline unable to ever produce the manifest its own gate
+    # requires: a bootstrap deadlock (see run 33595508885). The release gate
+    # is unaffected — the `release` job below still needs both `tests` and
+    # `compat-report`, so a failing test suite still blocks a release. The
+    # rejected alternative was softening the `tests` --check step to tolerate
+    # a missing manifest, which would let a *deleted* manifest pass silently;
+    # this project spent nine tasks removing exactly that kind of silence, so
+    # `tests` stays untouched. The bounded cost: on a dispatch, schedule or
+    # tag push where unit tests are failing, the matrix still runs and burns
+    # CI. It never runs on push or pull request, so the waste is limited, and
+    # the compatibility result it produces is still true regardless.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule' ||
