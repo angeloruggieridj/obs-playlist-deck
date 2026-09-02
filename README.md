@@ -312,7 +312,9 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 <!-- obs-compat:start -->
 | | |
 |---|---|
-| **OBS Studio** | **31.0+** (CI-certified). Built and tested against **32.1.2**. |
+| **OBS Studio** | **30.0 – 32.2.2** |
+| **Verified by** | Compile and link against each version's OBS SDK in CI — not a runtime test. |
+| **Built against** | 32.2.2 |
 | **Platforms** | Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon) |
 | **Qt** | Qt 6 |
 <!-- obs-compat:end -->

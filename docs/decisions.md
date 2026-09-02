@@ -217,3 +217,48 @@ declared minimum, provided the container build installs with
 component name is confirmed for 30.0.0 only — any other pre-31.x tag must be
 checked against its own `cmake/Modules/ObsHelpers.cmake` before assuming
 `obs_libraries` still applies.
+
+## The supported OBS range is derived, not declared (2026-09-02)
+
+The compat job tested a hard-coded version pair while the README claimed a
+range by hand and OBS_VERSION named a third number. Nothing kept them in
+agreement, and they had already drifted two minor versions apart.
+
+The range now comes from evidence: one probe per OBS minor from 30.0 up,
+compiled and linked against that version's SDK. Three choices are worth
+recording, because each rules out a plausible alternative:
+
+- **Compile and link, not runtime.** Honest about what CI can check, and the
+  README says so in those words rather than implying more.
+- **Contiguity.** The minimum is the start of the green block reaching the
+  newest probed minor, not the lowest minor that compiles: a hole below the
+  claimed floor would make the README false for exactly the people in it.
+- **Polling, not events.** Actions cannot subscribe to another repository's
+  releases, so a daily watch compares the newest OBS tag to the manifest and
+  wakes the matrix only when OBS has moved.
+
+First derived range: 30.0 – 32.2.2. Unverifiable in CI: none.
+
+Every probed minor from 30.0.0 through 32.2.0, plus the newest stable tag
+32.2.2, compiled and linked cleanly on the first real run (CI run
+[33596311564](https://github.com/angeloruggieridj/obs-playlist-deck/actions/runs/33596311564)):
+30.0.0/30.1.0/30.2.0 built in the jammy container (FFmpeg 4.4, below
+`LEGACY_BOUNDARY`), 31.0.0 through 32.2.2 built natively on ubuntu-24.04. No
+gaps, no obs-build failures, no plugin-build failures — the full grid was
+green, so `min_supported` lands at the floor (30.0, where
+`obs_frontend_add_dock_by_id()` was introduced) rather than somewhere above
+it. The old hand-written README claimed "31.0+"; the measured floor is
+actually one minor lower, and `OBS_VERSION` moved from the hand-set 32.1.2
+to the CI-measured 32.2.2.
+
+This first real run also surfaced a genuine defect the fixture-only tests
+never could: `compat-discover` declared `needs: tests`, and `tests` always
+fails its own `obs_compat.py --check` step when no manifest exists yet.
+GitHub Actions skips every job downstream of a failed dependency regardless
+of that job's own `if:` condition, so on a true first run the entire compat
+matrix was skipped and no manifest could ever be produced — a bootstrap
+deadlock, confirmed by dispatching the workflow before the fix (run
+33595508885: `tests` failed, all nine other jobs skipped, zero artifacts).
+Fixed by dropping `needs: tests` from `compat-discover` alone; `release`
+still needs both `tests` and `compat-report`, so a failing test suite still
+blocks a release.

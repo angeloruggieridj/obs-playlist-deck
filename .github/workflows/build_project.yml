@@ -28,7 +28,7 @@ permissions:
 # next build. The comment is what keeps the pin readable and updatable.
 
 env:
-  OBS_VERSION: "32.1.2"
+  OBS_VERSION: "32.2.2"
   OBS_DEPS_VERSION: "2025-08-23"
 
 jobs:
