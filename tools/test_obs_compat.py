@@ -187,14 +187,19 @@ class DeriveRange(unittest.TestCase):
         with self.assertRaisesRegex(obs_compat.RangeError, re.escape(MAX_TESTED)):
             obs_compat.derive_range(results, GRID, MAX_TESTED)
 
-    def test_max_tested_failing_at_plugin_build_blocks_the_range_too(self):
-        # Same as above, but the plugin itself is what failed to build
-        # against max_tested -- an even stronger reason no range naming it
-        # can be declared.
+    def test_max_tested_failing_at_plugin_build_does_not_block_derive_range(self):
+        # The plugin failed to build against max_tested -- it is a known,
+        # specific incompatibility that _report will report precisely as
+        # EXIT_INCOMPATIBLE. Unlike an obs-build failure (the SDK would not
+        # build), a plugin-build failure does not make the range undecidable.
+        # derive_range must not raise; the broken check in _report is what
+        # reports this finding.
         results = grid_results()
         results[MAX_TESTED] = incompatible()
-        with self.assertRaisesRegex(obs_compat.RangeError, re.escape(MAX_TESTED)):
-            obs_compat.derive_range(results, GRID, MAX_TESTED)
+        derived = obs_compat.derive_range(results, GRID, MAX_TESTED)
+        self.assertEqual(derived["min_supported"], "30.0")
+        self.assertEqual(derived["gaps"], [])
+        self.assertEqual(derived["unverifiable"], [])
 
     def test_the_declared_minimum_failing_at_obs_build_still_shifts_up(self):
         # Pin the related path that already works: an unbuildable SDK at the
@@ -936,6 +941,9 @@ class ReportGateChecksMaxTestedItself(unittest.TestCase):
     def test_max_tested_failing_at_obs_build_is_not_exit_ok(self):
         # Reproduces the bug report: 32.2.0 (top of the grid) green, 32.2.2
         # (max_tested, required) red at obs-build. The old code exited 0.
+        # The SDK could not build on the runner, so the range cannot be
+        # declared -- report this as EXIT_NO_RANGE, not EXIT_INCOMPATIBLE,
+        # to direct the reader to CI setup, not the plugin code.
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             artifact_dir = self._artifact_dir(root, unbuildable())
@@ -944,11 +952,15 @@ class ReportGateChecksMaxTestedItself(unittest.TestCase):
             with mock.patch("sys.stderr", stderr):
                 exit_code = obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
             self.assertEqual(exit_code, obs_compat.EXIT_NO_RANGE)
-            self.assertIn(MAX_TESTED, stderr.getvalue())
+            stderr_text = stderr.getvalue()
+            self.assertIn(MAX_TESTED, stderr_text)
+            self.assertIn("could not be built", stderr_text)
 
-    def test_max_tested_failing_at_plugin_build_is_not_exit_ok(self):
-        # Same gap, but the plugin itself is what failed against max_tested
-        # -- still not a version whose successful build can be declared.
+    def test_max_tested_failing_at_plugin_build_exits_incompatible(self):
+        # When the plugin itself fails against max_tested, that is a known,
+        # specific incompatibility, not an undecidable range. _report must
+        # return EXIT_INCOMPATIBLE with a message naming the plugin as the
+        # cause, sending whoever reads it to the plugin code, not to CI setup.
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             artifact_dir = self._artifact_dir(root, incompatible())
@@ -956,8 +968,10 @@ class ReportGateChecksMaxTestedItself(unittest.TestCase):
             stderr = io.StringIO()
             with mock.patch("sys.stderr", stderr):
                 exit_code = obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
-            self.assertEqual(exit_code, obs_compat.EXIT_NO_RANGE)
-            self.assertIn(MAX_TESTED, stderr.getvalue())
+            self.assertEqual(exit_code, obs_compat.EXIT_INCOMPATIBLE)
+            stderr_text = stderr.getvalue()
+            self.assertIn(MAX_TESTED, stderr_text)
+            self.assertIn("plugin", stderr_text.lower())
 
 
 class ReportExcludesTheBetaFromTheGate(unittest.TestCase):
