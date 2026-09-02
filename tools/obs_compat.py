@@ -93,7 +93,11 @@ def select_grid(tags: list[str]) -> list[str]:
 def highest_stable(tags: list[str]) -> str:
     stable = [v for v in _parsed(tags) if is_stable(v)]
     if not stable:
-        raise SystemExit("error: the tag list contains no stable OBS release")
+        # Not SystemExit: that class is not an Exception, so it would escape
+        # main()'s catch-all and exit 1 -- the one code reserved for "the
+        # plugin does not compile against a probed OBS version". An empty
+        # stable-tag list says nothing about the plugin at all.
+        raise RangeError("the tag list contains no stable OBS release")
     return _format(max(stable, key=sort_key))
 
 
@@ -363,7 +367,7 @@ def check(root: Path = ROOT) -> list[str]:
 
 
 # Below this, the runner's FFmpeg 7 cannot build OBS, so the probe moves into an
-# ubuntu:22.04 container (FFmpeg 4.4). Raise this to FLOOR to disable the
+# ubuntu:22.04 container (FFmpeg 4.4). Lower this to FLOOR to disable the
 # container path entirely — the older probes then report obs-build failures,
 # which the range logic already treats as unverifiable rather than unsupported.
 LEGACY_BOUNDARY = (31, 0)

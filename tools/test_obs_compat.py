@@ -89,6 +89,14 @@ class Bounds(unittest.TestCase):
     def test_highest_stable_ignores_prereleases(self):
         self.assertEqual(obs_compat.highest_stable(fixture_tags()), "32.2.2")
 
+    def test_an_all_prerelease_tag_list_raises_range_error_not_system_exit(self):
+        # M1: SystemExit is not an Exception, so it would escape main()'s
+        # catch-all and exit 1 -- the code reserved for "the plugin does not
+        # compile against a probed OBS version". An empty stable-tag list
+        # says nothing about the plugin at all, so it must be a RangeError.
+        with self.assertRaises(obs_compat.RangeError):
+            obs_compat.highest_stable(["32.3.0-beta1"])
+
     def test_no_beta_when_the_newest_prerelease_predates_the_newest_stable(self):
         self.assertIsNone(obs_compat.qualifying_beta(fixture_tags()))
 
