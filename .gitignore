@@ -4,3 +4,5 @@ build-*/
 *.user
 .DS_Store
 out/
+.claude/worktrees/
+__pycache__/

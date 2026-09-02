@@ -8,7 +8,12 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * 1" # weekly (Mon 06:00 UTC) — exercises the compat matrix
+    # Daily watch: cheap. compat-discover compares the newest OBS release
+    # against obs-compat.json and starts the heavy jobs only when OBS moved.
+    - cron: "0 6 * * *"
+    # Weekly full run: not all breakage is version-driven — runner images and
+    # system dependencies rot on their own schedule.
+    - cron: "0 7 * * 1"
 
 # Least privilege by default: only the release job needs to write to the
 # repository, and it asks for that itself. A build job that is compromised (or
@@ -23,8 +28,18 @@ permissions:
 # next build. The comment is what keeps the pin readable and updatable.
 
 env:
-  OBS_VERSION: "32.1.2"
+  OBS_VERSION: "32.2.2"
   OBS_DEPS_VERSION: "2025-08-23"
+  # The macOS version the shipped plugin actually supports. Pinned, not left to
+  # default, because CMake otherwise targets whatever the runner happens to be
+  # running: the binary's real minimum used to follow the runner image while the
+  # bundle's Info.plist claimed 11.0, so the package promised macOS versions it
+  # could not run on. 13.0 is what OBS 32.2 itself targets
+  # (CMakePresets.json: CMAKE_OSX_DEPLOYMENT_TARGET), and the plugin links
+  # against those libraries, so it cannot honestly claim to support less.
+  # This one value feeds both cmake invocations and LSMinimumSystemVersion, so
+  # the binary and the manifest cannot disagree again.
+  MACOS_DEPLOYMENT_TARGET: "13.0"
 
 jobs:
   tests:
@@ -45,6 +60,13 @@ jobs:
       # version; a release is only coherent if they name the same one.
       - name: Versions agree
         run: python3 tools/check_version.py
+      # The README's compatibility table, obs-compat.json and OBS_VERSION are
+      # three statements about the same thing; this is what stops them
+      # disagreeing for months, and costs a second on every PR.
+      - name: Compatibility declaration is in sync
+        run: python3 tools/obs_compat.py --check
+      - name: Compat matrix logic
+        run: python3 -m unittest discover -s tools -p "test_*.py"
 
   linux:
     name: Linux x86_64
@@ -197,7 +219,11 @@ jobs:
   macos:
     name: macOS universal
     needs: tests
-    runs-on: macos-15
+    # macos-26, not macos-15: OBS 32.2's build refuses an SDK older than macOS
+    # 26.5 ("Your macOS SDK version is too low"), and macos-15 ships 15.5. The
+    # image is pinned rather than left at macos-latest so a runner-image
+    # rotation cannot silently change what the shipped binary is built against.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install dependencies
@@ -232,7 +258,11 @@ jobs:
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: /tmp/obs-dev
-          key: obsdev-mac-universal-${{ env.OBS_VERSION }}-v1
+          # The deployment target is part of the key: a prefix built for an
+          # older minimum (or on the previous runner image, which had no
+          # explicit target at all) must never be restored into a build that
+          # promises a different one.
+          key: obsdev-mac-universal-${{ env.OBS_VERSION }}-${{ env.MACOS_DEPLOYMENT_TARGET }}-v2
       - name: Clone OBS source
         if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: |
@@ -253,6 +283,7 @@ jobs:
             -DENABLE_BROWSER=OFF \
             -DENABLE_VLC=OFF \
             -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${{ env.MACOS_DEPLOYMENT_TARGET }}" \
             -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
             -DCMAKE_PREFIX_PATH="/tmp/obs-deps-qt6;/tmp/obs-deps"
       - name: Build OBS
@@ -268,6 +299,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTS=OFF \
             -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${{ env.MACOS_DEPLOYMENT_TARGET }}" \
             -Dlibobs_DIR="/tmp/obs-dev/Frameworks/libobs.framework/Resources/cmake" \
             -Dobs-frontend-api_DIR="/tmp/obs-dev/lib/cmake/obs-frontend-api" \
             -DQt6_DIR="/tmp/obs-deps-qt6/lib/cmake/Qt6" \
@@ -311,7 +343,7 @@ jobs:
             <key>CFBundlePackageType</key><string>BNDL</string>
             <key>CFBundleShortVersionString</key><string>${version}</string>
             <key>CFBundleVersion</key><string>${version}</string>
-            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>LSMinimumSystemVersion</key><string>${{ env.MACOS_DEPLOYMENT_TARGET }}</string>
           </dict>
           </plist>
           PLIST
@@ -361,25 +393,58 @@ jobs:
           name: obs-playlist-deck-macos
           path: obs-playlist-deck-macos-universal.tar.gz
 
-  # Best-effort compatibility check: does the plugin compile against older OBS
-  # SDKs? Informational only (continue-on-error) and not a release gate.
+  # What OBS versions this plugin supports is derived here, not asserted by
+  # hand: one probe per OBS minor, a contiguity rule, and a manifest the README
+  # is generated from. See docs/superpowers/specs/2026-08-31-obs-compat-matrix-design.md
+  compat-discover:
+    name: OBS compat — discover
+    # No `needs: tests` here, deliberately. This job answers a question about
+    # OBS SDK compatibility, which does not depend on the plugin's unit tests
+    # passing — and on the first-ever run there is no obs-compat.json yet, so
+    # `tests --check` fails, and GitHub Actions skips every job downstream of
+    # a failed dependency regardless of that job's own `if:`. A `needs: tests`
+    # here made the pipeline unable to ever produce the manifest its own gate
+    # requires: a bootstrap deadlock (see run 33595508885). The release gate
+    # is unaffected — the `release` job below still needs both `tests` and
+    # `compat-report`, so a failing test suite still blocks a release. The
+    # rejected alternative was softening the `tests` --check step to tolerate
+    # a missing manifest, which would let a *deleted* manifest pass silently;
+    # this project spent nine tasks removing exactly that kind of silence, so
+    # `tests` stays untouched. The bounded cost: on a dispatch, schedule or
+    # tag push where unit tests are failing, the matrix still runs and burns
+    # CI. It never runs on push or pull request, so the waste is limited, and
+    # the compatibility result it produces is still true regardless.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    outputs:
+      run_full: ${{ steps.discover.outputs.run_full }}
+      native: ${{ steps.discover.outputs.native }}
+      jammy: ${{ steps.discover.outputs.jammy }}
+      grid: ${{ steps.discover.outputs.grid }}
+      latest_stable: ${{ steps.discover.outputs.latest_stable }}
+      beta: ${{ steps.discover.outputs.beta }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - id: discover
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # Which cron fired: the weekly one always runs the full matrix.
+          GITHUB_SCHEDULE: ${{ github.event.schedule }}
+        run: python3 tools/obs_compat.py --discover
+
   compat:
     name: OBS compat ${{ matrix.obs }}
-    needs: tests
-    # Heavy (builds old OBS from source); only on demand or the weekly schedule,
-    # not on every push/PR.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    needs: compat-discover
+    if: needs.compat-discover.outputs.run_full == 'true'
     runs-on: ubuntu-24.04
-    continue-on-error: true
+    continue-on-error: ${{ !matrix.required }}
     strategy:
       fail-fast: false
       matrix:
-        # 31.0.0 is the CI-certified minimum; 32.2.0-beta2 verifies forward
-        # compatibility with the upcoming 32.2 line. (OBS 30.x can't be built
-        # from source on current runners — OBS-30 vs the runner's FFmpeg — which
-        # is an OBS build issue, not a plugin one; the plugin's API needs exist
-        # since OBS 30.0.)
-        obs: ["31.0.0", "32.2.0-beta2"]
+        include: ${{ fromJSON(needs.compat-discover.outputs.native) }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install build deps
@@ -400,35 +465,89 @@ jobs:
             libqrcodegencpp-dev librist-dev libsrt-openssl-dev \
             libfontconfig1-dev libfreetype-dev \
             libpci-dev libpulse-dev libudev-dev libasound2-dev
-      - name: Cache OBS dev
-        id: cache-obsdev
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      - uses: ./.github/actions/obs-compat-probe
         with:
-          path: /tmp/obs-dev
-          key: obsdev-linux-${{ matrix.obs }}-v1
-      - name: Build OBS dev (${{ matrix.obs }})
-        if: steps.cache-obsdev.outputs.cache-hit != 'true'
+          obs-version: ${{ matrix.obs }}
+          env-name: native
+
+  # ubuntu-24.04 ships FFmpeg 7, which OBS 30-era code does not build against.
+  # That is an OBS build problem, not a plugin one, so the older SDKs are built
+  # in jammy rather than written off as incompatible.
+  compat-legacy:
+    name: OBS compat ${{ matrix.obs }} (jammy)
+    needs: compat-discover
+    if: >-
+      needs.compat-discover.outputs.run_full == 'true' &&
+      needs.compat-discover.outputs.jammy != '[]'
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    continue-on-error: ${{ !matrix.required }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.compat-discover.outputs.jammy) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install build deps
         run: |
-          git clone --depth=1 --branch ${{ matrix.obs }} \
-            https://github.com/obsproject/obs-studio.git /tmp/obs
-          # OBS 32.2's Linux helper calls add_dependencies(obs-studio <execs> <mods>)
-          # which errors when plugins/executables are disabled (empty lists).
-          # We only build obs-frontend-api, so guard that call.
-          sed -i 's|add_dependencies(${target} ${obs_executables} ${obs_modules})|if(obs_executables OR obs_modules)\n      add_dependencies(${target} ${obs_executables} ${obs_modules})\n    endif()|' /tmp/obs/cmake/linux/helpers.cmake || true
-          # Keep the frontend enabled (obs-frontend-api lives in it on OBS 32.x);
-          # only disable the heavy optional bits. Mirrors the macOS/Windows jobs.
-          cmake -B /tmp/obs-build -S /tmp/obs -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
-            -DENABLE_PLUGINS=OFF -DENABLE_SCRIPTING=OFF \
-            -DENABLE_BROWSER=OFF -DENABLE_VLC=OFF
-          cmake --build /tmp/obs-build --target obs-frontend-api --parallel
-          cmake --install /tmp/obs-build --component Development --prefix /tmp/obs-dev
-      - name: Configure + build plugin against OBS ${{ matrix.obs }}
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git cmake ninja-build pkg-config extra-cmake-modules g++ \
+            qt6-base-dev qt6-base-private-dev libqt6svg6-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev \
+            libavfilter-dev libswscale-dev libswresample-dev libx264-dev \
+            libcurl4-openssl-dev libjansson-dev libmbedtls-dev \
+            uthash-dev nlohmann-json3-dev zlib1g-dev libpng-dev \
+            libpipewire-0.3-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shm0-dev \
+            libxcb-xfixes0-dev libxcb-composite0-dev libxcb-xinput-dev \
+            libxfixes-dev libxcomposite-dev libxinerama-dev libxss-dev \
+            libdrm-dev libva-dev libxcb-cursor-dev \
+            libfontconfig1-dev libfreetype-dev \
+            libpci-dev libpulse-dev libudev-dev libasound2-dev
+      - uses: ./.github/actions/obs-compat-probe
+        with:
+          obs-version: ${{ matrix.obs }}
+          env-name: jammy
+
+  compat-report:
+    name: OBS compat — report
+    needs: [compat-discover, compat, compat-legacy]
+    if: always() && needs.compat-discover.outputs.run_full == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: compat-artifacts
+          pattern: compat-*
+      # --report only ever writes a fresh obs-compat.json when it can derive
+      # a range (see save_manifest in _report). On EXIT_NO_RANGE it returns
+      # before that write, and checkout above left the *committed* manifest
+      # sitting at this same path -- indistinguishable, to the upload step
+      # below, from a genuinely fresh one. Removing it first means a
+      # no-range run uploads nothing rather than a stale file that looks
+      # current: "no files were found" in the log instead of a silent lie.
+      - name: Remove the committed manifest so a no-range run cannot pass it off as fresh
+        run: rm -f obs-compat.json
+      - name: Derive the supported range
         run: |
-          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF \
-            -DCMAKE_PREFIX_PATH="/tmp/obs-dev;/usr"
-          cmake --build build
+          python3 tools/obs_compat.py --report \
+            --artifacts compat-artifacts \
+            --grid '${{ needs.compat-discover.outputs.grid }}' \
+            --latest-stable '${{ needs.compat-discover.outputs.latest_stable }}' \
+            --beta '${{ needs.compat-discover.outputs.beta }}'
+      # See tools/obs_compat.py's UPDATE_INSTRUCTIONS for the three steps a
+      # human needs after a non-zero exit here: this artifact is what step 1
+      # downloads. It is absent, not stale, when the step above didn't run.
+      - name: Upload the manifest as it would be written
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: obs-compat-manifest
+          path: obs-compat.json
+          if-no-files-found: warn
 
   # Stream Deck companion packaging: installable zip + Elgato .streamDeckPlugin,
   # published as public release assets.
@@ -473,6 +592,7 @@ jobs:
       - windows
       - macos
       - streamdeck
+      - compat-report
     runs-on: ubuntu-24.04
     # contents: write publishes the release; the other two let the job mint a
     # build provenance attestation, which is signed with an OIDC token.
@@ -491,6 +611,14 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: release-assets
+          # Without this, a tag push also pulls in the ten compat-probe JSON
+          # artifacts (compat-*, obs-compat-manifest) alongside the actual
+          # packages. They are not release assets, but merge-multiple with no
+          # pattern cannot tell the difference -- they landed in
+          # release-assets/ and were signed into the build-provenance
+          # attestation below via subject-path: release-assets/*, silently
+          # changing what that attestation's subject set means.
+          pattern: obs-playlist-deck-*
           merge-multiple: true
       # The release body is this version's CHANGELOG section, not GitHub's
       # auto-generated commit list.

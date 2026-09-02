@@ -1,0 +1,59 @@
+{
+  "beta_tested": null,
+  "floor": {
+    "reason": "obs_frontend_add_dock_by_id() was introduced in OBS 30.0",
+    "version": "30.0"
+  },
+  "gaps": [],
+  "generated": "2026-09-02",
+  "max_tested": "32.2.2",
+  "min_supported": "30.0",
+  "results": {
+    "30.0.0": {
+      "env": "jammy",
+      "phase": null,
+      "status": "ok"
+    },
+    "30.1.0": {
+      "env": "jammy",
+      "phase": null,
+      "status": "ok"
+    },
+    "30.2.0": {
+      "env": "jammy",
+      "phase": null,
+      "status": "ok"
+    },
+    "31.0.0": {
+      "env": "native",
+      "phase": null,
+      "status": "ok"
+    },
+    "31.1.0": {
+      "env": "native",
+      "phase": null,
+      "status": "ok"
+    },
+    "32.0.0": {
+      "env": "native",
+      "phase": null,
+      "status": "ok"
+    },
+    "32.1.0": {
+      "env": "native",
+      "phase": null,
+      "status": "ok"
+    },
+    "32.2.0": {
+      "env": "native",
+      "phase": null,
+      "status": "ok"
+    },
+    "32.2.2": {
+      "env": "native",
+      "phase": null,
+      "status": "ok"
+    }
+  },
+  "unverifiable": []
+}

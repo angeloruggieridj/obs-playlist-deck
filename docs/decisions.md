@@ -165,3 +165,100 @@ dock is about to perform.
 - **Code signing.** Certificates are not free and are not issued to one-person
   projects. Build provenance attestation, per-asset digests and VirusTotal
   reports are what ships instead — see [verification.md](verification.md).
+
+## 15. OBS 30.0.0 builds in an ubuntu:22.04 container (2026-08-31)
+
+`ubuntu-24.04` ships FFmpeg 7, which OBS 30-era code does not compile
+against. That is an OBS build problem, not a plugin incompatibility, but the
+compat matrix could not tell the two apart, so the declared minimum sat at
+31.0 while the plugin's actual API floor is 30.0
+(`obs_frontend_add_dock_by_id`).
+
+Probing 30.0.0 in an `ubuntu:22.04` container (FFmpeg 4.4, Qt 6.2):
+**obs-frontend-api builds and installs.** `libobs.so.30` and
+`libobs-frontend-api.so.30` compile cleanly with jammy's g++ 11.4.0 against
+Qt6 6.2.4+dfsg-2ubuntu1.1 and libavcodec 7:4.4.2-0ubuntu0.22.04.1, and
+`cmake --install` places a complete dev tree — `obs-frontend-api.h` included
+— under the install prefix.
+
+Two build-script issues surfaced along the way, neither of which bears on
+buildability itself:
+- Jammy packages the Qt6 SVG module as `libqt6svg6-dev`; the `qt6-svg-dev`
+  metapackage name is a later-Ubuntu convention and does not exist in jammy.
+- OBS 30.x's `export_target()` (`cmake/Modules/ObsHelpers.cmake`) tags every
+  `install()` rule `COMPONENT obs_libraries`. `--component Development` —
+  correct for 31.x+, and already what `build_project.yml`'s `compat` job uses
+  for 31.0.0/32.x — silently installs nothing against 30.x: no error, no
+  files, just an empty prefix. `--component obs_libraries` is required for
+  a 30.x build.
+
+Confirmed apt package list for `ubuntu:22.04` (identical to the brief's list
+except `qt6-svg-dev` → `libqt6svg6-dev`):
+```
+git cmake ninja-build pkg-config extra-cmake-modules g++
+qt6-base-dev qt6-base-private-dev libqt6svg6-dev
+libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev
+libavfilter-dev libswscale-dev libswresample-dev libx264-dev
+libcurl4-openssl-dev libjansson-dev libmbedtls-dev
+uthash-dev nlohmann-json3-dev zlib1g-dev libpng-dev
+libpipewire-0.3-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+libgles2-mesa-dev libx11-dev libx11-xcb-dev libxcb1-dev
+libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shm0-dev
+libxcb-xfixes0-dev libxcb-composite0-dev libxcb-xinput-dev
+libxfixes-dev libxcomposite-dev libxinerama-dev libxss-dev
+libdrm-dev libva-dev libxcb-cursor-dev
+libfontconfig1-dev libfreetype-dev
+libpci-dev libpulse-dev libudev-dev libasound2-dev
+```
+
+Consequence: minors below 31.0 are probed in the container and can lower the
+declared minimum, provided the container build installs with
+`--component obs_libraries` rather than `--component Development`. That
+component name is confirmed for 30.0.0 only — any other pre-31.x tag must be
+checked against its own `cmake/Modules/ObsHelpers.cmake` before assuming
+`obs_libraries` still applies.
+
+## 16. The supported OBS range is derived, not declared (2026-09-02)
+
+The compat job tested a hard-coded version pair while the README claimed a
+range by hand and OBS_VERSION named a third number. Nothing kept them in
+agreement, and they had already drifted two minor versions apart.
+
+The range now comes from evidence: one probe per OBS minor from 30.0 up,
+compiled and linked against that version's SDK. Three choices are worth
+recording, because each rules out a plausible alternative:
+
+- **Compile and link, not runtime.** Honest about what CI can check, and the
+  README says so in those words rather than implying more.
+- **Contiguity.** The minimum is the start of the green block reaching the
+  newest probed minor, not the lowest minor that compiles: a hole below the
+  claimed floor would make the README false for exactly the people in it.
+- **Polling, not events.** Actions cannot subscribe to another repository's
+  releases, so a daily watch compares the newest OBS tag to the manifest and
+  wakes the matrix only when OBS has moved.
+
+First derived range: 30.0 – 32.2.2. Unverifiable in CI: none.
+
+Every probed minor from 30.0.0 through 32.2.0, plus the newest stable tag
+32.2.2, compiled and linked cleanly on the first real run (CI run
+[33596311564](https://github.com/angeloruggieridj/obs-playlist-deck/actions/runs/33596311564)):
+30.0.0/30.1.0/30.2.0 built in the jammy container (FFmpeg 4.4, below
+`LEGACY_BOUNDARY`), 31.0.0 through 32.2.2 built natively on ubuntu-24.04. No
+gaps, no obs-build failures, no plugin-build failures — the full grid was
+green, so `min_supported` lands at the floor (30.0, where
+`obs_frontend_add_dock_by_id()` was introduced) rather than somewhere above
+it. The old hand-written README claimed "31.0+"; the measured floor is
+actually one minor lower, and `OBS_VERSION` moved from the hand-set 32.1.2
+to the CI-measured 32.2.2.
+
+This first real run also surfaced a genuine defect the fixture-only tests
+never could: `compat-discover` declared `needs: tests`, and `tests` always
+fails its own `obs_compat.py --check` step when no manifest exists yet.
+GitHub Actions skips every job downstream of a failed dependency regardless
+of that job's own `if:` condition, so on a true first run the entire compat
+matrix was skipped and no manifest could ever be produced — a bootstrap
+deadlock, confirmed by dispatching the workflow before the fix (run
+33595508885: `tests` failed, all nine other jobs skipped, zero artifacts).
+Fixed by dropping `needs: tests` from `compat-discover` alone; `release`
+still needs both `tests` and `compat-report`, so a failing test suite still
+blocks a release.
