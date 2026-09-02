@@ -152,10 +152,26 @@ def derive_range(results: dict[str, dict], grid: list[str], max_tested: str) -> 
     # says nothing about that specific tag; only checking it directly does.
     # Without this, a required probe could fail here without ever tripping
     # this function, and the range would still get declared against it.
-    if results.get(max_tested, {}).get("status") != "ok":
+    #
+    # Phase matters here in a way it does not for the check above: a
+    # plugin-build failure at max_tested is not "no range can be derived" --
+    # it is a known, specific incompatibility, and _report's own broken-list
+    # check exists precisely to report that as EXIT_INCOMPATIBLE with a
+    # message naming the plugin as the cause. Raising RangeError for it here
+    # would reach the caller first and relabel a "the plugin is broken"
+    # finding as "the range is undecidable", which sends whoever reads the
+    # exit code hunting in the wrong place. Only a non-plugin reason (the
+    # SDK itself would not build, or the probe never reported at all) earns
+    # the RangeError treatment; a plugin-build failure falls through and
+    # lets the grid walk below proceed, so build_manifest still succeeds and
+    # _report's later broken check is the one that reports it.
+    max_tested_result = results.get(max_tested) or {}
+    max_tested_green = max_tested_result.get("status") == "ok"
+    max_tested_is_plugin_incompatibility = max_tested_result.get("phase") == "plugin-build"
+    if not max_tested_green and not max_tested_is_plugin_incompatibility:
         raise RangeError(
-            f"max_tested ({max_tested}) is not green, so the range cannot "
-            f"be declared without it"
+            f"max_tested ({max_tested}) could not be built on the runner, "
+            f"so the range cannot be declared without it"
         )
 
     index = len(grid) - 1
