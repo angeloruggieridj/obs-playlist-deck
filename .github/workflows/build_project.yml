@@ -44,6 +44,23 @@ env:
 jobs:
   tests:
     name: Unit tests
+    # Skipped on the daily watch, and only there. That cron exists to ask OBS
+    # whether it has published anything; on a quiet day `compat-discover`
+    # answers in about seven seconds and nothing else needs to wake up. Without
+    # this, adding the daily cron quietly moved the whole platform build matrix
+    # from once a week to seven times a week, because these jobs are not gated
+    # on the event at all.
+    #
+    # The other build jobs follow from here rather than repeating the
+    # condition: they declare `needs: tests`, and Actions skips a job whose
+    # dependency was skipped. `compat-discover` is deliberately outside that
+    # chain — it has no `needs:` (see its own comment below), which is exactly
+    # what lets the watch run on a day when everything else stays asleep.
+    #
+    # Every other trigger still runs the full workflow: pushes, pull requests,
+    # tags, manual dispatch, and the weekly cron, which exists precisely to
+    # catch the breakage that is not version-driven.
+    if: github.event_name != 'schedule' || github.event.schedule != '0 6 * * *'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
