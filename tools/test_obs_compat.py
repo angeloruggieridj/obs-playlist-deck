@@ -407,6 +407,30 @@ class ProbeTable(unittest.TestCase):
         self.assertLess(body.index("**30.0 – 32.2.2**"), body.index("`30.0.0`"))
 
 
+class LineEndings(unittest.TestCase):
+    def test_write_never_produces_crlf(self):
+        # .gitattributes declares `* text=auto eol=lf`. Python's text mode
+        # translates "\n" to "\r\n" on Windows, so --write there rewrote the
+        # workflow and the README with CRLF and left a maintainer staring at a
+        # dirty tree whose diff showed no changed content. This assertion is a
+        # no-op on Linux CI and the whole point of the test on Windows.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                'env:\n  OBS_VERSION: "32.1.2"\n', encoding="utf-8", newline="\n")
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\nstale\n"
+                f"{obs_compat.README_END}\n", encoding="utf-8", newline="\n")
+            obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
+            obs_compat.write(root)
+
+            for name_ in ("README.md", "obs-compat.json",
+                          ".github/workflows/build_project.yml"):
+                with self.subTest(file=name_):
+                    self.assertNotIn(b"\r\n", (root / name_).read_bytes())
+
+
 class WorkflowVersion(unittest.TestCase):
     WORKFLOW = 'env:\n  OBS_VERSION: "32.1.2"\n  OBS_DEPS_VERSION: "2025-08-23"\n'
 

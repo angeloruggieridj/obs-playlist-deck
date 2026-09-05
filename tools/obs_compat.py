@@ -215,7 +215,10 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict | None:
 
 
 def save_manifest(data: dict, path: Path = MANIFEST_PATH) -> None:
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # newline="\n": this file is committed and diffed, and the repo declares
+    # eol=lf; Python's text mode would write CRLF on Windows.
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8", newline="\n")
 
 
 def build_manifest(results: dict[str, dict], grid: list[str], max_tested: str,
@@ -390,16 +393,20 @@ def write(root: Path = ROOT) -> None:
         raise RangeError(
             "no obs-compat.json to render from; run: python3 tools/obs_compat.py --report")
 
+    # newline="\n" throughout: .gitattributes declares `* text=auto eol=lf`,
+    # but Python's text mode translates "\n" to "\r\n" on Windows, so a
+    # maintainer running --write there rewrote these files with CRLF and was
+    # left with a dirty tree whose diff showed no changed content.
     readme = root / "README.md"
     readme.write_text(
         replace_between_markers(readme.read_text(encoding="utf-8"),
                                 render_readme_section(manifest)),
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
 
     workflow = root / WORKFLOW_REL
     workflow.write_text(
         set_workflow_obs_version(workflow.read_text(encoding="utf-8"), manifest["max_tested"]),
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
 
 
 def check(root: Path = ROOT) -> list[str]:
