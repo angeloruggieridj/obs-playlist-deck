@@ -247,6 +247,52 @@ STATIC_ROWS = [
 _OBS_VERSION = re.compile(r'^(\s*OBS_VERSION:\s*")([^"]*)(")', re.MULTILINE)
 
 
+# How each probe environment reads to someone who has never opened the
+# workflow. "jammy" and "native" are our words, not theirs.
+ENV_LABELS = {
+    "native": "Ubuntu 24.04",
+    "jammy": "Ubuntu 22.04 (container)",
+}
+
+
+def _probe_outcome(result: dict) -> str:
+    """What one probe proved, phrased for a reader rather than for the tool.
+
+    The phase carries the weight here exactly as it does everywhere else: a
+    plugin-build failure means this plugin does not compile against that OBS,
+    while an obs-build failure only means we could not produce that SDK on our
+    runner and says nothing about the plugin. The two must not collapse into a
+    single red mark in the one table a non-contributor actually reads.
+    """
+    if result.get("status") == "ok":
+        return "✅ compiles and links"
+    if result.get("phase") == "plugin-build":
+        return "❌ does not compile"
+    return "⚠️ SDK could not be built in CI"
+
+
+def render_probe_table(manifest: dict) -> str:
+    """Every version CI probed, so the declared range can be checked, not trusted.
+
+    The range above it is a conclusion. Without this a reader has to open
+    obs-compat.json to learn which versions were actually tried, in which
+    environment, and what each one proved.
+    """
+    results = manifest.get("results", {})
+    # Sorted as versions, not as text: "32.2.10" precedes "32.2.2"
+    # lexicographically, and a reader scanning for the newest row would be
+    # handed the wrong one. Unparseable keys sort first rather than raising.
+    ordered = sorted(results, key=lambda v: sort_key(parse_version(v) or (0, 0, 0, "")))
+    lines = ["| OBS | Result | Built on |", "|---|---|---|"]
+    for version in ordered:
+        result = results[version]
+        env = result.get("env", "")
+        lines.append(
+            f"| `{version}` | {_probe_outcome(result)} | {ENV_LABELS.get(env, env or '—')} |"
+        )
+    return "\n".join(lines)
+
+
 def render_readme_section(manifest: dict) -> str:
     rows = [
         ("OBS Studio", f"**{manifest['min_supported']} – {manifest['max_tested']}**"),
@@ -270,7 +316,23 @@ def render_readme_section(manifest: dict) -> str:
     rows.extend(STATIC_ROWS)
     lines = ["| | |", "|---|---|"]
     lines += [f"| **{label}** | {value} |" for label, value in rows]
-    return "\n".join(lines)
+
+    # Conclusion first, evidence behind a fold: the range is what most readers
+    # came for, but a claim nobody can check is how this project got into
+    # trouble in the first place. The table is generated from the same manifest
+    # as the range, so the two cannot drift.
+    return (
+        "\n".join(lines)
+        + "\n\n<details>\n<summary>Every OBS version CI probed</summary>\n\n"
+        + render_probe_table(manifest)
+        # Deliberately no generation date here. This block is guarded by an
+        # equality check, so anything that changes when the facts have not --
+        # a timestamp above all -- makes every matrix run demand a cosmetic
+        # regeneration and turns the weekly run into a failure nobody reads.
+        # The date lives in obs-compat.json, which this points at.
+        + "\n\nGenerated from [`obs-compat.json`](obs-compat.json) by "
+        + "`tools/obs_compat.py`.\n</details>"
+    )
 
 
 def _find_markers(text: str) -> tuple[int, int]:
