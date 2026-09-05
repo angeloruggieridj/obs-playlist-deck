@@ -303,15 +303,25 @@ class ReadmeRendering(unittest.TestCase):
         self.assertIn("32.3.0-beta1", body)
         self.assertIn("**30.0 – 32.2.2**", body)
 
-    def test_no_beta_row_when_the_beta_failed_at_plugin_build(self):
+    def test_a_red_beta_is_shown_as_failing_and_never_claimed_as_supported(self):
         # CRITICAL 1: a red beta must never be advertised as something this
         # plugin "also builds against" -- that claim would contradict the
         # same manifest's own `results` entry for it.
+        #
+        # It must still APPEAR, though, marked as failing. The probe table is
+        # evidence of what was measured, under a heading that says so; dropping
+        # a measured failure from it would be the same silent omission this
+        # whole feature exists to prevent, and a beta that breaks the plugin is
+        # the most useful early warning the system can give. The claim is what
+        # gets suppressed, not the fact.
         results = grid_results()
         results["32.3.0-beta1"] = incompatible()
         body = obs_compat.render_readme_section(
             sample_manifest(beta_tested="32.3.0-beta1", results=results))
-        self.assertNotIn("32.3.0-beta1", body)
+        self.assertNotIn("Also builds against", body)
+        beta_row = next(line for line in body.splitlines()
+                        if "`32.3.0-beta1`" in line)
+        self.assertIn("does not compile", beta_row)
         self.assertNotIn("Also builds against", body)
 
     def test_no_beta_row_when_the_beta_has_no_result_at_all(self):
@@ -339,6 +349,86 @@ class ReadmeRendering(unittest.TestCase):
     def test_missing_markers_are_an_error_not_a_silent_no_op(self):
         with self.assertRaises(obs_compat.RangeError):
             obs_compat.replace_between_markers("no markers here", "new")
+
+
+class ProbeTable(unittest.TestCase):
+    """The range in the README is a conclusion; this table is its evidence."""
+
+    def test_every_probed_version_is_listed(self):
+        table = obs_compat.render_probe_table(sample_manifest())
+        for version in GRID:
+            self.assertIn(f"`{version}`", table)
+
+    def test_versions_are_ordered_by_version_not_by_string(self):
+        # "32.2.10" sorts before "32.2.2" as text; a reader scanning the table
+        # for the newest row must not be handed the wrong one.
+        manifest = sample_manifest()
+        manifest["results"] = {
+            "32.2.10": ok(), "32.2.2": ok(), "30.2.0": ok(), "31.0.0": ok(),
+        }
+        rows = [line for line in obs_compat.render_probe_table(manifest).splitlines()
+                if line.startswith("| `")]
+        self.assertEqual(
+            [row.split("`")[1] for row in rows],
+            ["30.2.0", "31.0.0", "32.2.2", "32.2.10"],
+        )
+
+    def test_an_unbuildable_sdk_does_not_read_as_an_incompatibility(self):
+        # The distinction the whole feature exists for, in the one place a
+        # non-contributor actually reads.
+        manifest = sample_manifest()
+        manifest["results"]["30.0.0"] = unbuildable()
+        row = next(line for line in obs_compat.render_probe_table(manifest).splitlines()
+                   if "`30.0.0`" in line)
+        self.assertIn("could not be built", row)
+        self.assertNotIn("does not compile", row)
+
+    def test_a_real_incompatibility_says_so(self):
+        manifest = sample_manifest()
+        manifest["results"]["31.0.0"] = incompatible()
+        row = next(line for line in obs_compat.render_probe_table(manifest).splitlines()
+                   if "`31.0.0`" in line)
+        self.assertIn("does not compile", row)
+        self.assertNotIn("could not be built", row)
+
+    def test_environments_are_named_for_the_reader_not_for_the_workflow(self):
+        manifest = sample_manifest()
+        manifest["results"]["30.0.0"] = ok("jammy")
+        table = obs_compat.render_probe_table(manifest)
+        self.assertIn("Ubuntu 22.04", table)
+        self.assertIn("Ubuntu 24.04", table)
+        self.assertNotIn("jammy", table)
+
+    def test_the_readme_section_carries_the_table_and_points_at_the_manifest(self):
+        body = obs_compat.render_readme_section(sample_manifest())
+        self.assertIn("`30.0.0`", body)
+        self.assertIn("obs-compat.json", body)
+        # Still a conclusion first, evidence second.
+        self.assertLess(body.index("**30.0 – 32.2.2**"), body.index("`30.0.0`"))
+
+
+class LineEndings(unittest.TestCase):
+    def test_write_never_produces_crlf(self):
+        # .gitattributes declares `* text=auto eol=lf`. Python's text mode
+        # translates "\n" to "\r\n" on Windows, so --write there rewrote the
+        # workflow and the README with CRLF and left a maintainer staring at a
+        # dirty tree whose diff showed no changed content. This assertion is a
+        # no-op on Linux CI and the whole point of the test on Windows.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                'env:\n  OBS_VERSION: "32.1.2"\n', encoding="utf-8", newline="\n")
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\nstale\n"
+                f"{obs_compat.README_END}\n", encoding="utf-8", newline="\n")
+            obs_compat.save_manifest(sample_manifest(), root / "obs-compat.json")
+            obs_compat.write(root)
+
+            for name_ in ("README.md", "obs-compat.json",
+                          ".github/workflows/build_project.yml"):
+                with self.subTest(file=name_):
+                    self.assertNotIn(b"\r\n", (root / name_).read_bytes())
 
 
 class WorkflowVersion(unittest.TestCase):
@@ -1039,10 +1129,14 @@ class ReportExcludesTheBetaFromTheGate(unittest.TestCase):
             (root / ".github" / "workflows" / "build_project.yml").write_text(
                 f'env:\n  OBS_VERSION: "{MAX_TESTED}"\n', encoding="utf-8")
 
-            # What a red beta renders to: no beta row at all -- indistinguishable
-            # from a manifest that was never given a beta to begin with.
+            # What a red beta renders to: a failing row in the probe table, and
+            # no "Also builds against" claim anywhere. The expectation carries
+            # the red beta too, because the README the run produces will show
+            # it -- suppressing the claim is not the same as hiding the probe.
+            expected_results = dict(grid_results())
+            expected_results[self.BETA] = incompatible()
             expected_manifest = obs_compat.build_manifest(
-                grid_results(), GRID, MAX_TESTED, None, "2026-08-31")
+                expected_results, GRID, MAX_TESTED, self.BETA, "2026-08-31")
             (root / "README.md").write_text(
                 f"## Compatibility\n\n{obs_compat.README_START}\n"
                 f"{obs_compat.render_readme_section(expected_manifest)}\n"
@@ -1119,8 +1213,11 @@ class ReportExcludesTheBetaFromTheGate(unittest.TestCase):
 
             written = obs_compat.load_manifest(root / "obs-compat.json")
             rendered = obs_compat.render_readme_section(written)
-            self.assertNotIn(self.BETA, rendered)
+            # The claim is suppressed; the measured failure is not hidden.
             self.assertNotIn("Also builds against", rendered)
+            beta_row = next(line for line in rendered.splitlines()
+                            if f"`{self.BETA}`" in line)
+            self.assertIn("does not compile", beta_row)
 
 
 class ReportExitsCleanWhenEverythingAlreadyMatches(unittest.TestCase):

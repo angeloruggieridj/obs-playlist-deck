@@ -317,6 +317,24 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 | **Built against** | 32.2.2 |
 | **Platforms** | Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon) |
 | **Qt** | Qt 6 |
+
+<details>
+<summary>Every OBS version CI probed</summary>
+
+| OBS | Result | Built on |
+|---|---|---|
+| `30.0.0` | ✅ compiles and links | Ubuntu 22.04 (container) |
+| `30.1.0` | ✅ compiles and links | Ubuntu 22.04 (container) |
+| `30.2.0` | ✅ compiles and links | Ubuntu 22.04 (container) |
+| `31.0.0` | ✅ compiles and links | Ubuntu 24.04 |
+| `31.1.0` | ✅ compiles and links | Ubuntu 24.04 |
+| `32.0.0` | ✅ compiles and links | Ubuntu 24.04 |
+| `32.1.0` | ✅ compiles and links | Ubuntu 24.04 |
+| `32.2.0` | ✅ compiles and links | Ubuntu 24.04 |
+| `32.2.2` | ✅ compiles and links | Ubuntu 24.04 |
+
+Generated from [`obs-compat.json`](obs-compat.json) by `tools/obs_compat.py`.
+</details>
 <!-- obs-compat:end -->
 
 ## Building from source
