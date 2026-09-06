@@ -23,6 +23,15 @@ drives an **existing OBS media source** from it. Pick a source, build your
 playlist, and play items through it — you never edit the source's file path by
 hand while live. No browser source, no embedded web server: pure OBS + Qt.
 
+<div align="center">
+
+<img src="docs/images/playlist-deck-dock.svg" width="360"
+  alt="The Playlist Deck dock inside OBS: a playlist picker and bound media source at the top, a now-playing card with a seekable progress bar and transport controls, the playlist with per-item durations and a file-not-found row, the edit toolbar, and the end-of-clip mode selector.">
+
+<sub>The dock inside OBS — playlist, source and clip names are fictitious.</sub>
+
+</div>
+
 ## Table of contents
 
 - [Features](#features)
