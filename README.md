@@ -114,22 +114,31 @@ Download your platform's build from the
 > OBS 33.
 
 ### Windows
-Extract the zip into `C:\ProgramData\obs-studio\plugins` — the folder OBS
-searches for plugins on Windows, for every account on the PC. It survives OBS
-updates, and the OBS install folder is never touched.
+**Installer (recommended):** run `obs-playlist-deck-windows-setup.exe` with
+OBS closed. It installs into `C:\ProgramData\obs-studio\plugins` — the folder
+OBS searches for plugins on Windows, for every account on the PC — asking for
+administrator rights once. Run it again to upgrade; uninstall from Windows
+*Settings → Apps*. Your playlists and settings are kept either way. Because the
+installer is not code-signed, SmartScreen may warn about it: choose *More info →
+Run anyway* (see [Unsigned builds](#unsigned-builds)).
+
+**Zip (manual, or portable OBS):** extract it into the same folder:
 
 ```powershell
 Expand-Archive obs-playlist-deck-windows.zip -DestinationPath "$env:PROGRAMDATA\obs-studio\plugins" -Force
 ```
-You end up with `…\plugins\obs-playlist-deck\obs-playlist-deck.dll` (OBS 33),
-`…\obs-playlist-deck\bin\64bit\obs-playlist-deck.dll` (OBS 32 and earlier) and
-`…\obs-playlist-deck\data\`. Then restart OBS. If Windows refuses to write
-there, run PowerShell as administrator.
+For a portable OBS 33, extract it into the `plugins` folder next to OBS instead.
+
+Either way you end up with `…\plugins\obs-playlist-deck\obs-playlist-deck.dll`
+(OBS 33), `…\obs-playlist-deck\bin\64bit\obs-playlist-deck.dll` (OBS 32 and
+earlier) and `…\obs-playlist-deck\data\`. Then restart OBS. If Windows refuses
+to write there, run PowerShell as administrator.
 
 > [!IMPORTANT]
 > Versions up to 1.3.2 told you to install under `%APPDATA%\obs-studio\plugins`.
 > **OBS never loads plugins from there on Windows**, so a copy in that folder
-> did nothing. Delete it and install as above.
+> did nothing. The installer offers to remove it; with the zip, delete it by
+> hand.
 
 ### Linux
 Pick the package for your Ubuntu release: the plugin uses the system FFmpeg,
@@ -178,7 +187,8 @@ Then open OBS → the **Playlist Deck** dock appears under the *Docks* menu.
 The releases carry **no publisher signature on any platform** — code-signing
 certificates are neither free nor issued to one-person projects. Your OS will
 say so: macOS quarantines the plugin (and OBS then fails to load it, silently),
-Windows marks the zip as coming from the internet.
+Windows marks the zip as coming from the internet, and SmartScreen warns before
+running the installer.
 
 Unsigned does not mean unverifiable. Every release is built in public from the
 tagged source, and ships a signed **build provenance attestation**, GitHub's

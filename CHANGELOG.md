@@ -5,6 +5,44 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] — 2026-09-26
+
+A Windows installer, so the plugin no longer has to be unpacked by hand into
+the one folder OBS searches. The plugin itself is unchanged from 1.3.3, and so
+is its compatibility: **OBS 30.0 – 32.2.2**, with OBS 33 supported partially
+while it is in beta.
+
+### Added
+
+- **Windows installer** (`obs-playlist-deck-windows-setup.exe`). It installs
+  into `C:\ProgramData\obs-studio\plugins\obs-playlist-deck` — the folder OBS
+  searches on Windows — in both the layout OBS 33 loads and the legacy one
+  OBS 32 and earlier load, exactly like the zip, so one installer covers OBS 30
+  through 33 and keeps working when OBS 34 drops the legacy layout.
+  - It asks for administrator rights once: that folder is shared by every
+    account on the PC, and a subfolder may belong to another one.
+  - It will not replace the plugin while OBS is running — OBS keeps it
+    loaded — and asks you to close OBS first.
+  - Running it again upgrades in place; the data folder is replaced whole, so
+    nothing a newer version dropped lingers.
+  - It offers to remove the copy that the instructions up to 1.3.2 put in
+    `%APPDATA%\obs-studio\plugins`, which OBS never loaded.
+  - It uninstalls from *Settings → Apps*, removing the plugin folder and
+    anything an earlier zip install left in it, but not your playlists and
+    settings, which OBS keeps in its own `plugin_config` folder.
+  - Its screens are in nine of the plugin's ten languages (Chinese falls back
+    to English: Inno Setup ships no translation for it).
+
+  It is not code-signed, like the other packages, so SmartScreen warns before
+  running it; it is covered by the same build provenance attestation and
+  VirusTotal scan. The zip stays, for manual and portable installs.
+- **CI runs the installer for real.** On every build the Windows job installs
+  it silently on the runner, installs it again over itself, and uninstalls it,
+  checking after each step that the right files — byte for byte the built
+  plugin — are where OBS looks, that *Settings → Apps* shows the right version,
+  that the `%APPDATA%` copy is gone, and that uninstalling leaves nothing
+  behind.
+
 ## [1.3.3] — 2026-09-26
 
 Getting ready for OBS 33, which changes where plugins live, and fixing what
@@ -638,6 +676,7 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
+[1.3.4]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.0...v1.3.1
