@@ -186,6 +186,14 @@ jobs:
         run: |
           curl -L "https://github.com/obsproject/obs-studio/archive/refs/tags/%OBS_VERSION%.zip" -o obs.zip
           tar -xf obs.zip -C C:\
+      # OBS 33: generate obs-core-modules.c with core modules off; see
+      # obs-compat-probe. A no-op before 33.
+      - name: Patch OBS source
+        if: steps.cache-obsdev.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          perl -pi -e 's/^(\s*)set_property\(GLOBAL APPEND PROPERTY OBS_FEATURES_DISABLED "Core Modules"\)\s*$/$&$1set_obs_core_modules()\n/' \
+            "/c/obs-studio-${OBS_VERSION}/plugins/CMakeLists.txt"
       - name: Configure OBS
         if: steps.cache-obsdev.outputs.cache-hit != 'true'
         shell: cmd
@@ -292,6 +300,10 @@ jobs:
           # language"). It is a runtime graphics module nothing here links, so
           # drop it; we only need libobs + obs-frontend-api dev files.
           sed -i.bak 's/^\( *\)add_subdirectory(libobs-metal)/\1# disabled for dev build: add_subdirectory(libobs-metal)/' /tmp/obs/CMakeLists.txt
+          # OBS 33: generate obs-core-modules.c with core modules off; see
+          # obs-compat-probe. A no-op before 33.
+          perl -pi -e 's/^(\s*)set_property\(GLOBAL APPEND PROPERTY OBS_FEATURES_DISABLED "Core Modules"\)\s*$/$&$1set_obs_core_modules()\n/' \
+            /tmp/obs/plugins/CMakeLists.txt
       - name: Configure OBS (universal)
         if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: |

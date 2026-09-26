@@ -46,6 +46,13 @@ runs:
           # obs-frontend-api is built. Harmless on versions without the call.
           { sed -i 's|add_dependencies(${target} ${obs_executables} ${obs_modules})|if(obs_executables OR obs_modules)\n      add_dependencies(${target} ${obs_executables} ${obs_modules})\n    endif()|' \
               /tmp/obs/cmake/linux/helpers.cmake || true; } &&
+          # OBS 33's libobs compiles obs-core-modules.c, which only
+          # set_obs_core_modules() generates -- at the end of
+          # plugins/CMakeLists.txt, after the early return() taken when core
+          # modules are off. Call it in that branch too (an empty list is valid
+          # C). No match, and so no change, on versions before 33.
+          { perl -pi -e 's/^(\s*)set_property\(GLOBAL APPEND PROPERTY OBS_FEATURES_DISABLED "Core Modules"\)\s*$/$&$1set_obs_core_modules()\n/' \
+              /tmp/obs/plugins/CMakeLists.txt || true; } &&
           # OBS 33 renamed the option to ENABLE_CORE_MODULES; ENABLE_PLUGINS is
           # now only a global property derived from it, so passing the old name
           # alone configures every bundled module (aja then fails on a missing
