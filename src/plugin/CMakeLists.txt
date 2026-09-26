@@ -85,20 +85,37 @@ else()
   message(STATUS "Playlist Deck: FFmpeg not found - duration probing disabled")
 endif()
 
+# OBS 33 moved third-party plugins to a new layout and still loads the old one,
+# flagged "Legacy", until OBS 34. OBS 32 and earlier know only the old one. So
+# Windows and Linux install BOTH: OBS 33+ loads the new copy first and skips
+# the legacy one as a duplicate of an already-loaded module (a log line, not a
+# failure), while OBS 32 and earlier never look at the new path. macOS is
+# unchanged in OBS 33: the .plugin bundle is assembled by the packaging step.
 if(WIN32)
-  set(OBS_PLUGIN_DESTINATION "obs-plugins/64bit")
-  set(OBS_DATA_DESTINATION   "data/obs-plugins/obs-playlist-deck")
+  # Relative to a plugins folder -- C:\ProgramData\obs-studio\plugins, or
+  # <portable OBS>\plugins on OBS 33 -- so `cmake --install --prefix` there is
+  # a working install. The data folder is the same path in both layouts.
+  set(OBS_PLUGIN_DESTINATIONS "obs-playlist-deck" "obs-playlist-deck/bin/64bit")
+  set(OBS_DATA_DESTINATIONS   "obs-playlist-deck/data")
 elseif(APPLE)
-  set(OBS_PLUGIN_DESTINATION "obs-plugins")
-  set(OBS_DATA_DESTINATION   "obs-plugins/obs-playlist-deck")
+  set(OBS_PLUGIN_DESTINATIONS "obs-plugins")
+  set(OBS_DATA_DESTINATIONS   "obs-plugins/obs-playlist-deck")
 else()
   include(GNUInstallDirs)
   if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install path prefix." FORCE)
   endif()
-  set(OBS_PLUGIN_DESTINATION "${CMAKE_INSTALL_LIBDIR}/obs-plugins")
-  set(OBS_DATA_DESTINATION   "${CMAKE_INSTALL_DATAROOTDIR}/obs/obs-plugins/obs-playlist-deck")
+  set(OBS_PLUGIN_DESTINATIONS
+    "${CMAKE_INSTALL_LIBDIR}/obs-modules/plugins"
+    "${CMAKE_INSTALL_LIBDIR}/obs-plugins")
+  set(OBS_DATA_DESTINATIONS
+    "${CMAKE_INSTALL_DATAROOTDIR}/obs/obs-modules/plugins/obs-playlist-deck"
+    "${CMAKE_INSTALL_DATAROOTDIR}/obs/obs-plugins/obs-playlist-deck")
 endif()
 
-install(TARGETS obs-playlist-deck LIBRARY DESTINATION "${OBS_PLUGIN_DESTINATION}")
-install(DIRECTORY "${CMAKE_SOURCE_DIR}/data/" DESTINATION "${OBS_DATA_DESTINATION}")
+foreach(destination IN LISTS OBS_PLUGIN_DESTINATIONS)
+  install(TARGETS obs-playlist-deck LIBRARY DESTINATION "${destination}")
+endforeach()
+foreach(destination IN LISTS OBS_DATA_DESTINATIONS)
+  install(DIRECTORY "${CMAKE_SOURCE_DIR}/data/" DESTINATION "${destination}")
+endforeach()
