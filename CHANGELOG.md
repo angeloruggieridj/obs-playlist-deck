@@ -19,16 +19,18 @@ to the public. The supported range stays **OBS 30.0 – 32.2.2**.
 
 ### Fixed
 
-- **The Linux package never loaded into OBS installed from its Ubuntu
-  package.** It put the plugin in `/usr/lib/obs-plugins/libobs-playlist-deck.so`.
-  OBS on Ubuntu looks in `/usr/lib/x86_64-linux-gnu/obs-plugins`, and names a
-  module after its file, so even found there it would have been
-  "libobs-playlist-deck", looking for data in a folder that does not exist. The
-  build asked CMake for the multiarch library folder before setting the `/usr`
-  prefix, and CMake only picks that folder for `/usr`; and Linux libraries get a
-  `lib` prefix unless told otherwise. Both are fixed, and CI now installs OBS's
-  own package and checks that the plugin is where OBS looks, under the right
-  name, next to its data.
+- **The Linux package never loaded.** It put the plugin in
+  `/usr/lib/obs-plugins/libobs-playlist-deck.so`, and no OBS on Ubuntu looks
+  there: the OBS PPA and Ubuntu's package use `/usr/lib/x86_64-linux-gnu`, and
+  OBS's own `.deb` installs under `/usr/local`. The build asked CMake for the
+  multiarch library folder before setting the `/usr` prefix, and CMake only
+  picks it for `/usr`. And OBS names a module after its file, so even found it
+  would have been "libobs-playlist-deck", looking for its data in a folder that
+  does not exist. The package is now **installed per user** (`tar -xzf … -C ~`,
+  no `sudo`) into the folders every OBS searches whatever its own install
+  prefix, and the file is `obs-playlist-deck.so`. CI now installs OBS's own
+  `.deb` and checks that the plugin is where OBS looks, under the right name,
+  next to its data, with every library and symbol resolved.
 - **The recommended Windows install location never worked.** The README told
   you to extract the zip into `%APPDATA%\obs-studio\plugins`, and 1.3.0's notes
   called it the layout the package had always been built for. OBS has never
@@ -63,9 +65,9 @@ to the public. The supported range stays **OBS 30.0 – 32.2.2**.
 
 - **The plugin ships in OBS 33's new folder layout and in the old one.** OBS 33
   looks for `…\plugins\obs-playlist-deck\obs-playlist-deck.dll` on Windows and
-  `/usr/lib/x86_64-linux-gnu/obs-modules/plugins/` on Linux; the old layout is
-  still loaded, marked *Legacy*, but not from OBS 34 onwards. The Windows zip
-  and the Linux packages carry both: OBS 33 loads the new copy first and skips
+  `~/.local/share/obs-studio/plugins/obs-playlist-deck/` on Linux; the old
+  layout is still loaded, marked *Legacy*, but not from OBS 34 onwards. The
+  Windows zip and the Linux packages carry both: OBS 33 loads the new copy first and skips
   the legacy one as a duplicate (a line in its log, not a failure), while OBS 32
   and earlier never look at the new path. Extracting over a previous install
   upgrades it in place. macOS is unchanged in OBS 33.
@@ -74,9 +76,9 @@ to the public. The supported range stays **OBS 30.0 – 32.2.2**.
 
 - **CI checks that the Linux packages load into the OBS people install.** For
   `OBS_VERSION` and for the newest beta, it installs every Ubuntu `.deb` OBS
-  publishes into a container of that Ubuntu, unpacks the matching package over
-  it, and has the dynamic linker resolve every library and symbol the plugin
-  imports, in both layouts. A failure against the release OBS blocks a release;
+  publishes into a container of that Ubuntu, unpacks the matching package into
+  the home folder as the README says, and has the dynamic linker resolve every
+  library and symbol the plugin imports, in both layouts. A failure against the release OBS blocks a release;
   one against a beta is reported.
 
 ## [1.3.2] — 2026-08-31

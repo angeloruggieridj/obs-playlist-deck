@@ -117,19 +117,25 @@ jobs:
             -DBUILD_TESTS=OFF -DCMAKE_PREFIX_PATH="/usr"
       - name: Build
         run: cmake --build build
+      # The per-user layout (PLD_LINUX_LAYOUT=user, the default): the package
+      # is extracted into $HOME, which every OBS searches whatever its install
+      # prefix. See the install rules in src/plugin/CMakeLists.txt.
       - name: Install
-        run: DESTDIR="$GITHUB_WORKSPACE/release" cmake --install build
+        run: cmake --install build --prefix "$GITHUB_WORKSPACE/release"
       - name: Package
         run: |
           # Both layouts, or the package silently stops loading on one side of
-          # OBS 33 (see the install rules in src/plugin/CMakeLists.txt).
-          for f in usr/lib/x86_64-linux-gnu/obs-modules/plugins/obs-playlist-deck.so \
-                   usr/lib/x86_64-linux-gnu/obs-plugins/obs-playlist-deck.so \
-                   usr/share/obs/obs-modules/plugins/obs-playlist-deck/locale/en-US.ini \
-                   usr/share/obs/obs-plugins/obs-playlist-deck/locale/en-US.ini; do
-            [ -f "release/$f" ] || { echo "::error::missing from the package: /$f"; exit 1; }
+          # OBS 33.
+          new=.local/share/obs-studio/plugins/obs-playlist-deck
+          legacy=.config/obs-studio/plugins/obs-playlist-deck
+          for f in "$new/obs-playlist-deck.so" "$new/data/locale/en-US.ini" \
+                   "$legacy/bin/64bit/obs-playlist-deck.so" "$legacy/data/locale/en-US.ini"; do
+            [ -f "release/$f" ] || { echo "::error::missing from the package: ~/$f"; exit 1; }
           done
-          tar -czf "$PACKAGE" -C "$GITHUB_WORKSPACE/release" .
+          # Only the two plugin folders, never "." or their parents: tar applies
+          # an archived directory's mode on extraction, and this is unpacked
+          # into the user's home.
+          tar -czf "$PACKAGE" -C "$GITHUB_WORKSPACE/release" "$new" "$legacy"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: obs-playlist-deck-linux-ubuntu-${{ matrix.ubuntu }}

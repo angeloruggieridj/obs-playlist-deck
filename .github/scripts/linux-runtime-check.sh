@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # Installs each Ubuntu .deb that OBS publishes for a release into a container
-# of that Ubuntu, unpacks our package for the same Ubuntu over it, and asks the
-# dynamic linker to resolve every library and symbol the plugin imports. Both
-# copies of the plugin are checked: the OBS 33 layout and the legacy one.
+# of that Ubuntu, unpacks our package for the same Ubuntu into $HOME as the
+# README says, and asks the dynamic linker to resolve every library and symbol
+# the plugin imports. Both copies are checked: the OBS 33 layout and the legacy
+# one.
 #
 # Usage: linux-runtime-check.sh <packages-dir> <required-obs-version> [optional-obs-version]
 #
@@ -41,16 +42,21 @@ check_version() {
         set -euo pipefail
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "./debs/$1" > /dev/null
-        tar -xzf "$2" -C /
+        # OBS finds its own libobs through the executable RPATH; outside the
+        # obs process only the linker cache can, and OBS .debs install under
+        # /usr/local without refreshing it.
+        ldconfig
+        # Installed exactly as the README says: extracted into $HOME.
+        tar -xzf "$2" -C "$HOME"
         status=0
         # Each copy must sit where that OBS looks, under the module name OBS
-        # derives from the file name, next to a data folder of the same name.
-        for pair in \
-            /usr/lib/x86_64-linux-gnu/obs-modules/plugins/obs-playlist-deck.so:/usr/share/obs/obs-modules/plugins/obs-playlist-deck \
-            /usr/lib/x86_64-linux-gnu/obs-plugins/obs-playlist-deck.so:/usr/share/obs/obs-plugins/obs-playlist-deck; do
-          so="${pair%%:*}" data="${pair#*:}"
-          if [ ! -f "$so" ] || [ ! -f "$data/locale/en-US.ini" ]; then
-            echo "missing: $so or $data/locale/en-US.ini"; status=1; continue
+        # derives from the file name, next to its data folder.
+        for dir in "$HOME/.local/share/obs-studio/plugins/obs-playlist-deck" \
+                   "$HOME/.config/obs-studio/plugins/obs-playlist-deck"; do
+          so="$dir/obs-playlist-deck.so"
+          [ -f "$so" ] || so="$dir/bin/64bit/obs-playlist-deck.so"
+          if [ ! -f "$so" ] || [ ! -f "$dir/data/locale/en-US.ini" ]; then
+            echo "missing: the plugin or its data under $dir"; status=1; continue
           fi
           out="$(ldd -r "$so" 2>&1)"
           if printf "%s\n" "$out" | grep -E "not found|undefined symbol"; then

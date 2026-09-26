@@ -141,13 +141,22 @@ on both.
 | 24.04 | `obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz` | 30 – 32 |
 | 26.04 | `obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz` | 32 – 33 |
 
+Extract it into your home folder — no `sudo`:
 ```bash
-sudo tar -xzf obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz -C /
+tar -xzf obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz -C ~
 ```
-This is for a system OBS install (not Flatpak/Snap). It installs to
-`/usr/lib/x86_64-linux-gnu/obs-modules/plugins` (OBS 33) and
-`/usr/lib/x86_64-linux-gnu/obs-plugins` (OBS 32 and earlier), with the data
-under `/usr/share/obs/`. OBS 33 no longer publishes packages for Ubuntu 24.04.
+Then restart OBS. The plugin lands in `~/.local/share/obs-studio/plugins`
+(OBS 33) and `~/.config/obs-studio/plugins` (OBS 32 and earlier), which OBS
+searches however it was installed: from the OBS PPA, from Ubuntu's own package,
+or from the `.deb` on OBS's GitHub releases (which installs under `/usr/local`).
+Flatpak and Snap builds of OBS are not covered. OBS 33 no longer publishes
+packages for Ubuntu 24.04.
+
+> [!IMPORTANT]
+> Versions up to 1.3.2 were installed with `sudo tar … -C /` into
+> `/usr/lib/obs-plugins`, a folder OBS on Ubuntu does not search — so they did
+> not load. You can remove the leftovers:
+> `sudo rm -rf /usr/lib/obs-plugins/libobs-playlist-deck.so /usr/share/obs/obs-plugins/obs-playlist-deck`
 
 ### macOS (universal)
 ```bash
@@ -389,10 +398,17 @@ cmake --build build
 ```
 
 The install rules lay the plugin out the way OBS looks for it, in both the
-OBS 33 and the legacy layout. On Windows, installing straight into the plugins
-folder is a working install:
+OBS 33 and the legacy layout, so installing with the right prefix is a working
+install:
 ```powershell
+# Windows
 cmake --install build --config Release --prefix "$env:PROGRAMDATA\obs-studio\plugins"
+```
+```bash
+# Linux, per user (the layout the release package uses)
+cmake --install build --prefix "$HOME"
+# Linux, system-wide under /usr, for distribution packagers
+cmake -B build -DPLD_LINUX_LAYOUT=system && sudo cmake --install build
 ```
 
 Unit tests (no OBS/Qt needed):

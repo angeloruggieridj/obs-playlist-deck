@@ -101,25 +101,47 @@ elseif(APPLE)
   set(OBS_PLUGIN_DESTINATIONS "obs-plugins")
   set(OBS_DATA_DESTINATIONS   "obs-plugins/obs-playlist-deck")
 else()
-  # The prefix must be /usr BEFORE GNUInstallDirs runs: it only picks the
-  # multiarch libdir (lib/x86_64-linux-gnu, where Ubuntu's OBS looks) for a
-  # /usr prefix, and caches the answer. Included first, it saw /usr/local and
-  # settled on plain "lib", so every package up to 1.3.2 put the plugin in
-  # /usr/lib/obs-plugins -- a folder OBS on Ubuntu never searches.
-  if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install path prefix." FORCE)
-  endif()
-  include(GNUInstallDirs)
   # OBS names a module after its file, minus only the extension, and looks
   # for its data under that name: libobs-playlist-deck.so would be module
   # "libobs-playlist-deck", with no data folder of that name.
   set_target_properties(obs-playlist-deck PROPERTIES PREFIX "")
-  set(OBS_PLUGIN_DESTINATIONS
-    "${CMAKE_INSTALL_LIBDIR}/obs-modules/plugins"
-    "${CMAKE_INSTALL_LIBDIR}/obs-plugins")
-  set(OBS_DATA_DESTINATIONS
-    "${CMAKE_INSTALL_DATAROOTDIR}/obs/obs-modules/plugins/obs-playlist-deck"
-    "${CMAKE_INSTALL_DATAROOTDIR}/obs/obs-plugins/obs-playlist-deck")
+
+  # "user" is what the released package uses: paths relative to $HOME that
+  # every OBS searches whatever its own install prefix -- the PPA and Ubuntu's
+  # package live in /usr, OBS's own .deb in /usr/local, so no single system
+  # path reaches all three. `cmake --install --prefix "$HOME"` is then a
+  # working per-user install. "system" is for distribution packagers.
+  set(PLD_LINUX_LAYOUT "user" CACHE STRING "Linux install layout: user (relative to \$HOME) or system")
+  set_property(CACHE PLD_LINUX_LAYOUT PROPERTY STRINGS user system)
+
+  if(PLD_LINUX_LAYOUT STREQUAL "user")
+    # OBS 33 searches $XDG_DATA_HOME, OBS 32 and earlier (and OBS 33, as
+    # legacy) $XDG_CONFIG_HOME; both at their default locations.
+    set(OBS_PLUGIN_DESTINATIONS
+      ".local/share/obs-studio/plugins/obs-playlist-deck"
+      ".config/obs-studio/plugins/obs-playlist-deck/bin/64bit")
+    set(OBS_DATA_DESTINATIONS
+      ".local/share/obs-studio/plugins/obs-playlist-deck/data"
+      ".config/obs-studio/plugins/obs-playlist-deck/data")
+  elseif(PLD_LINUX_LAYOUT STREQUAL "system")
+    # The prefix must be /usr BEFORE GNUInstallDirs runs: it only picks the
+    # multiarch libdir (lib/x86_64-linux-gnu) for a /usr prefix, and caches
+    # the answer. Included first, it saw /usr/local and settled on plain
+    # "lib" -- which is how every package up to 1.3.2 ended up in
+    # /usr/lib/obs-plugins, a folder no OBS on Ubuntu searches.
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+      set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install path prefix." FORCE)
+    endif()
+    include(GNUInstallDirs)
+    set(OBS_PLUGIN_DESTINATIONS
+      "${CMAKE_INSTALL_LIBDIR}/obs-modules/plugins"
+      "${CMAKE_INSTALL_LIBDIR}/obs-plugins")
+    set(OBS_DATA_DESTINATIONS
+      "${CMAKE_INSTALL_DATAROOTDIR}/obs/obs-modules/plugins/obs-playlist-deck"
+      "${CMAKE_INSTALL_DATAROOTDIR}/obs/obs-plugins/obs-playlist-deck")
+  else()
+    message(FATAL_ERROR "PLD_LINUX_LAYOUT must be 'user' or 'system', not '${PLD_LINUX_LAYOUT}'")
+  endif()
 endif()
 
 foreach(destination IN LISTS OBS_PLUGIN_DESTINATIONS)
