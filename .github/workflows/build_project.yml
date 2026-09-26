@@ -105,18 +105,36 @@ jobs:
       PACKAGE: obs-playlist-deck-linux-ubuntu-${{ matrix.ubuntu }}-x86_64.tar.gz
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install OBS dev headers
+      # Built against OBS's own .deb for OBS_VERSION on this Ubuntu, which
+      # ships headers and CMake packages under /usr/local -- not Ubuntu's
+      # libobs-dev. The two disagree on libobs's soname: Ubuntu 24.04's is
+      # libobs.so.0, OBS's is libobs.so.30, and a plugin linked against the
+      # first does not load into the OBS from the PPA or OBS's .deb. A missing
+      # .deb (OBS 33 publishes none for 24.04) fails here, loudly, rather than
+      # quietly building against something else.
+      - name: Install OBS ${{ env.OBS_VERSION }} and build deps
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            libobs-dev qt6-base-dev qt6-svg-dev cmake ninja-build g++ pkg-config \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates
+          deb="OBS-Studio-${OBS_VERSION}-Ubuntu-${{ matrix.ubuntu }}-x86_64.deb"
+          curl -fsSLO "https://github.com/obsproject/obs-studio/releases/download/${OBS_VERSION}/${deb}" \
+            || { echo "::error::OBS ${OBS_VERSION} publishes no ${deb}"; exit 1; }
+          DEBIAN_FRONTEND=noninteractive apt-get install -y "./${deb}" \
+            qt6-base-dev qt6-svg-dev cmake ninja-build g++ pkg-config libsimde-dev \
             libavformat-dev libavutil-dev libcurl4-openssl-dev
       - name: Configure
         run: |
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTS=OFF -DCMAKE_PREFIX_PATH="/usr"
+            -DBUILD_TESTS=OFF -DCMAKE_PREFIX_PATH="/usr/local;/usr"
       - name: Build
         run: cmake --build build
+      - name: Links against OBS's libobs
+        run: |
+          # The whole point of building against the .deb: verify it happened.
+          needed="$(objdump -p build/src/plugin/obs-playlist-deck.so | awk '/NEEDED/ && /libobs/ {print $2}')"
+          echo "$needed"
+          echo "$needed" | grep -qx "libobs.so.30" \
+            || { echo "::error::expected NEEDED libobs.so.30 (OBS's soname), got: $needed"; exit 1; }
       # The per-user layout (PLD_LINUX_LAYOUT=user, the default): the package
       # is extracted into $HOME, which every OBS searches whatever its install
       # prefix. See the install rules in src/plugin/CMakeLists.txt.
