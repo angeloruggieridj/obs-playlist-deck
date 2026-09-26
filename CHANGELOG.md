@@ -31,6 +31,13 @@ to the public. The supported range stays **OBS 30.0 – 32.2.2**.
   prefix, and the file is `obs-playlist-deck.so`. CI now installs OBS's own
   `.deb` and checks that the plugin is where OBS looks, under the right name,
   next to its data, with every library and symbol resolved.
+- **The Linux build linked the wrong libobs.** It was compiled against Ubuntu's
+  `libobs-dev`, whose library is `libobs.so.0` on 24.04; OBS's own builds (the
+  PPA, and the `.deb` on its releases) call it `libobs.so.30`, so the plugin
+  could not have loaded into them even from the right folder. Each Linux package
+  is now built against OBS's own `.deb` for its Ubuntu, and CI checks the result
+  links `libobs.so.30`. The flip side: Ubuntu 24.04's own `obs-studio` package
+  (OBS 30.0) is not supported — the README points to the PPA.
 - **The recommended Windows install location never worked.** The README told
   you to extract the zip into `%APPDATA%\obs-studio\plugins`, and 1.3.0's notes
   called it the layout the package had always been built for. OBS has never
@@ -43,8 +50,8 @@ to the public. The supported range stays **OBS 30.0 – 32.2.2**.
   ships for. It was built on 24.04 and linked that release's FFmpeg
   (`libavformat.so.60`); 26.04 ships FFmpeg 8 (`libavformat.so.62`), so the
   dynamic linker refused the plugin before OBS could load it. There are now two
-  Linux packages, each built on its own Ubuntu: `…-ubuntu-24.04-…` and
-  `…-ubuntu-26.04-…`.
+  Linux packages, each built on its own Ubuntu against OBS's `.deb` for it:
+  `…-ubuntu-24.04-…` and `…-ubuntu-26.04-…`.
 - **The Windows and macOS builds used a different Qt from OBS.** Windows was
   compiled against Qt 6.7.3 and macOS against the obs-deps release of August
   2025 (Qt 6.8.3), while OBS 32.2 ships Qt 6.11.1 on both. The guard meant to

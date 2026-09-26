@@ -138,8 +138,13 @@ on both.
 
 | Ubuntu | Package | OBS |
 |---|---|---|
-| 24.04 | `obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz` | 30 – 32 |
-| 26.04 | `obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz` | 32 – 33 |
+| 24.04 | `obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz` | 30 – 32, from the OBS PPA or OBS's `.deb` |
+| 26.04 | `obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz` | 32 – 33, from the OBS PPA, OBS's `.deb` or Ubuntu |
+
+The packages are built against OBS's own `.deb`. Ubuntu 24.04's *own*
+`obs-studio` package names its core library differently (`libobs.so.0`, where
+OBS's builds use `libobs.so.30`), so the plugin does not load into it — install
+OBS from its PPA instead.
 
 Extract it into your home folder — no `sudo`:
 ```bash
