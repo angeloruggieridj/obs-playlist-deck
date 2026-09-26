@@ -59,8 +59,17 @@ check_version() {
             echo "missing: the plugin or its data under $dir"; status=1; continue
           fi
           out="$(ldd -r "$so" 2>&1)"
-          if printf "%s\n" "$out" | grep -E "not found|undefined symbol"; then
+          if printf "%s\n" "$out" | grep -E "not found|undefined symbol" | head -5; then
             echo "unresolved imports in $so"; status=1
+            # Enough to tell a wrong soname from a linker path problem.
+            apt-get install -y -qq binutils > /dev/null
+            echo "--- plugin NEEDED:"; readelf -d "$so" | grep NEEDED | grep -i obs || true
+            echo "--- libobs on disk:"
+            for lib in $(find / -xdev -name "libobs.so*" 2>/dev/null); do
+              printf "%s  %s\n" "$lib" "$(readelf -d "$lib" 2>/dev/null | grep SONAME | sed "s/.*\[\(.*\)\]/SONAME \1/")"
+            done
+            echo "--- linker cache:"; ldconfig -p | grep -E "libobs" || echo "(no libobs in the cache)"
+            echo "--- ld.so.conf:"; cat /etc/ld.so.conf.d/*.conf
           else
             echo "ok: $so"
           fi
