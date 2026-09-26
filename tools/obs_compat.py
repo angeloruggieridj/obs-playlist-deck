@@ -243,8 +243,9 @@ WORKFLOW_REL = Path(".github") / "workflows" / "build_project.yml"
 # Static rows. A Markdown table cannot be split by an HTML comment and still
 # render, so the generator owns the whole table; edit these here.
 STATIC_ROWS = [
-    ("Platforms", "Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon)"),
-    ("Qt", "Qt 6"),
+    ("Platforms", "Windows x64, Linux x86_64 (Ubuntu 24.04 and 26.04), "
+                  "macOS universal (Intel + Apple Silicon)"),
+    ("Qt", "Qt 6 — on Windows and macOS, the exact Qt the targeted OBS ships"),
 ]
 
 _OBS_VERSION = re.compile(r'^(\s*OBS_VERSION:\s*")([^"]*)(")', re.MULTILINE)
