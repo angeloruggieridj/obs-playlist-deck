@@ -102,11 +102,13 @@ Type: filesandordirs; Name: "{app}"
 [Code]
 function IsObsRunning(): Boolean;
 var
-  Wmi, Processes: Variant;
+  Locator, Wmi, Processes: Variant;
 begin
   Result := False;
   try
-    Wmi := CreateOleObject('WbemScripting.SWbemLocator').ConnectServer('.', 'root\CIMV2');
+    { Pascal Script cannot call a method on a call's result: one step each. }
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Wmi := Locator.ConnectServer('.', 'root\CIMV2');
     Processes := Wmi.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE Name = ''obs64.exe''');
     Result := Processes.Count > 0;
   except
