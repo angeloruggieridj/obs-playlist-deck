@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include <obs-module.h>
 #include <obs-frontend-api.h>
 #include <obs-websocket-api.h>
