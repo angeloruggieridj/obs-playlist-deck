@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/github/license/angeloruggieridj/obs-playlist-deck)](LICENSE)
 
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20universal-blue)
-![OBS](https://img.shields.io/badge/OBS%20Studio-31%2B-302e31?logo=obsstudio)
+![OBS](https://img.shields.io/badge/OBS%20Studio-30.0%2B-302e31?logo=obsstudio)
 ![Languages](https://img.shields.io/badge/i18n-10%20languages-brightgreen)
 
 [![VirusTotal](https://img.shields.io/badge/VirusTotal-scanned-394eff?logo=virustotal&logoColor=white)](https://github.com/angeloruggieridj/obs-playlist-deck/releases/latest)
@@ -324,6 +324,7 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 | **OBS Studio** | **30.0 – 32.2.2** |
 | **Verified by** | Compile and link against each version's OBS SDK in CI — not a runtime test. |
 | **Built against** | 32.2.2 |
+| **Also builds against** | 33.0.0-beta4 (prerelease, not supported) |
 | **Platforms** | Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon) |
 | **Qt** | Qt 6 |
 
@@ -341,6 +342,7 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 | `32.1.0` | ✅ compiles and links | Ubuntu 24.04 |
 | `32.2.0` | ✅ compiles and links | Ubuntu 24.04 |
 | `32.2.2` | ✅ compiles and links | Ubuntu 24.04 |
+| `33.0.0-beta4` | ✅ compiles and links | Ubuntu 24.04 |
 
 Generated from [`obs-compat.json`](obs-compat.json) by `tools/obs_compat.py`.
 </details>
