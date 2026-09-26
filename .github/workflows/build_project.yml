@@ -29,7 +29,10 @@ permissions:
 
 env:
   OBS_VERSION: "32.2.2"
-  OBS_DEPS_VERSION: "2025-08-23"
+  # There is deliberately no OBS_DEPS_VERSION or Qt version here any more. The
+  # Windows and macOS jobs read both from OBS_VERSION's own CMakePresets.json
+  # (tools/obs_deps.py): typed in by hand they had drifted to a Qt and an
+  # obs-deps release that OBS itself no longer used.
   # The macOS version the shipped plugin actually supports. Pinned, not left to
   # default, because CMake otherwise targets whatever the runner happens to be
   # running: the binary's real minimum used to follow the runner image while the
@@ -85,92 +88,159 @@ jobs:
       - name: Compat matrix logic
         run: python3 -m unittest discover -s tools -p "test_*.py"
 
+  # One package per Ubuntu release, each built in that release. The plugin links
+  # the system FFmpeg, whose sonames change between releases (24.04 ships
+  # libavformat.so.60, 26.04 libavformat.so.62), so a binary built on one does
+  # not load on the other. OBS 32 ships for both; OBS 33 only for 26.04.
   linux:
-    name: Linux x86_64
+    name: Linux x86_64 (Ubuntu ${{ matrix.ubuntu }})
     needs: tests
     runs-on: ubuntu-24.04
+    container: ubuntu:${{ matrix.ubuntu }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["24.04", "26.04"]
+    env:
+      PACKAGE: obs-playlist-deck-linux-ubuntu-${{ matrix.ubuntu }}-x86_64.tar.gz
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install OBS dev headers
+      # Built against OBS's own .deb for OBS_VERSION on this Ubuntu, which
+      # ships headers and CMake packages under /usr/local -- not Ubuntu's
+      # libobs-dev. The two disagree on libobs's soname: Ubuntu 24.04's is
+      # libobs.so.0, OBS's is libobs.so.30, and a plugin linked against the
+      # first does not load into the OBS from the PPA or OBS's .deb. A missing
+      # .deb (OBS 33 publishes none for 24.04) fails here, loudly, rather than
+      # quietly building against something else.
+      - name: Install OBS ${{ env.OBS_VERSION }} and build deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libobs-dev qt6-base-dev qt6-svg-dev cmake ninja-build \
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates
+          deb="OBS-Studio-${OBS_VERSION}-Ubuntu-${{ matrix.ubuntu }}-x86_64.deb"
+          curl -fsSLO "https://github.com/obsproject/obs-studio/releases/download/${OBS_VERSION}/${deb}" \
+            || { echo "::error::OBS ${OBS_VERSION} publishes no ${deb}"; exit 1; }
+          DEBIAN_FRONTEND=noninteractive apt-get install -y "./${deb}" \
+            qt6-base-dev qt6-svg-dev cmake ninja-build g++ pkg-config libsimde-dev \
             libavformat-dev libavutil-dev libcurl4-openssl-dev
       - name: Configure
         run: |
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTS=OFF -DCMAKE_PREFIX_PATH="/usr"
+            -DBUILD_TESTS=OFF -DCMAKE_PREFIX_PATH="/usr/local;/usr"
       - name: Build
         run: cmake --build build
+      - name: Links against OBS's libobs
+        run: |
+          # The whole point of building against the .deb: verify it happened.
+          needed="$(objdump -p build/src/plugin/obs-playlist-deck.so | awk '/NEEDED/ && /libobs/ {print $2}')"
+          echo "$needed"
+          echo "$needed" | grep -qx "libobs.so.30" \
+            || { echo "::error::expected NEEDED libobs.so.30 (OBS's soname), got: $needed"; exit 1; }
+      # The per-user layout (PLD_LINUX_LAYOUT=user, the default): the package
+      # is extracted into $HOME, which every OBS searches whatever its install
+      # prefix. See the install rules in src/plugin/CMakeLists.txt.
       - name: Install
-        run: DESTDIR="${{ github.workspace }}/release" cmake --install build
+        run: cmake --install build --prefix "$GITHUB_WORKSPACE/release"
       - name: Package
-        run: tar -czf obs-playlist-deck-linux-x86_64.tar.gz -C "${{ github.workspace }}/release" .
+        run: |
+          # Both layouts, or the package silently stops loading on one side of
+          # OBS 33.
+          new=.local/share/obs-studio/plugins/obs-playlist-deck
+          legacy=.config/obs-studio/plugins/obs-playlist-deck
+          for f in "$new/obs-playlist-deck.so" "$new/data/locale/en-US.ini" \
+                   "$legacy/bin/64bit/obs-playlist-deck.so" "$legacy/data/locale/en-US.ini"; do
+            [ -f "release/$f" ] || { echo "::error::missing from the package: ~/$f"; exit 1; }
+          done
+          # Only the two plugin folders, never "." or their parents: tar applies
+          # an archived directory's mode on extraction, and this is unpacked
+          # into the user's home.
+          tar -czf "$PACKAGE" -C "$GITHUB_WORKSPACE/release" "$new" "$legacy"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: obs-playlist-deck-linux
-          path: obs-playlist-deck-linux-x86_64.tar.gz
+          name: obs-playlist-deck-linux-ubuntu-${{ matrix.ubuntu }}
+          path: ${{ env.PACKAGE }}
+
+  # Compiling against headers says nothing about whether the package loads
+  # into the OBS people actually install. This installs OBS's own .deb for each
+  # Ubuntu it ships for, unpacks our package over it, and resolves every symbol
+  # the plugin imports (ldd -r). OBS_VERSION must pass; a newer beta is checked
+  # and reported, but does not fail the run.
+  linux-runtime:
+    name: Linux — loads into the published OBS
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: packages
+          pattern: obs-playlist-deck-linux-*
+          merge-multiple: true
+      - name: Resolve the OBS versions to check
+        id: versions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          beta="$(cd tools && python3 -c 'import os, obs_compat as c; print(c.qualifying_beta(c.fetch_tags(os.environ.get("GITHUB_TOKEN"))) or "")')"
+          echo "beta=$beta" >> "$GITHUB_OUTPUT"
+      - name: Check against each published OBS .deb
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/linux-runtime-check.sh packages \
+            "$OBS_VERSION" "${{ steps.versions.outputs.beta }}"
 
   windows:
     name: Windows x64
     needs: tests
     runs-on: windows-2022
-    env:
-      QT_WIN_VERSION: "6.7.3"
-      QT_WIN_ARCH: "win64_msvc2019_64"
-      # major.minor of the Qt that OBS ${OBS_VERSION} ships. The plugin build
-      # refuses to produce a binary for a different one: a Qt plugin loaded into
-      # OBS runs against OBS's Qt, and a mismatch crashes later, elsewhere.
-      QT_ABI: "6.7"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      # --- Qt (cached) ---
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: C:\Qt
-          key: qt-${{ env.QT_WIN_VERSION }}-${{ env.QT_WIN_ARCH }}-v1
-      - name: Install Qt6
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        shell: powershell
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "aqtinstall==3.1.*" "py7zr<1.0"
-          python -m aqt install-qt windows desktop ${{ env.QT_WIN_VERSION }} ${{ env.QT_WIN_ARCH }} -O C:\Qt
-      - name: Qt environment
-        shell: powershell
-        run: |
-          "Qt6_DIR=C:\Qt\${{ env.QT_WIN_VERSION }}\msvc2019_64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "C:\Qt\${{ env.QT_WIN_VERSION }}\msvc2019_64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      # Qt and the prebuilt deps are OBS's own, for OBS_VERSION: the obs-deps
+      # release its CMakePresets.json names. Qt used to come from aqtinstall at
+      # a version typed in here (6.7.3), while OBS 32.2 ships 6.11.1 -- and the
+      # Qt guard below was checked against a second hand-typed "6.7", so it
+      # agreed with the mistake instead of catching it. OBS_QT_ABI now comes
+      # from the obs-deps build script, a source independent of the Qt the
+      # build actually finds, which is what makes the guard mean something.
+      - name: Resolve OBS dependencies
+        run: python tools/obs_deps.py --obs-version "${{ env.OBS_VERSION }}" --platform windows
 
-      # --- OBS prebuilt deps (cached) ---
+      # --- OBS prebuilt deps and Qt (cached per obs-deps release) ---
       - name: Cache obs-deps
         id: cache-deps
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          path: C:\obs-deps
-          key: obsdeps-win-x64-v1
-      - name: Download OBS pre-built deps
+          path: |
+            C:\obs-deps
+            C:\obs-deps-qt6
+          key: obsdeps-win-x64-${{ env.OBS_DEPS_VERSION }}-qt6-${{ env.OBS_QT6_DEPS_VERSION }}-v2
+      - name: Download OBS pre-built deps and Qt
         if: steps.cache-deps.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Path C:\deps-raw -Force
-          New-Item -ItemType Directory -Path C:\obs-deps -Force
-          gh release download --repo obsproject/obs-deps --pattern "windows-deps-[0-9]*-x64*.zip" --dir C:\deps-raw
-          $zip = (Get-ChildItem "C:\deps-raw" -Filter "*.zip" | Select-Object -First 1).FullName
-          Expand-Archive $zip -DestinationPath C:\obs-deps-extract
-          $top = Get-ChildItem "C:\obs-deps-extract"
-          if ($top.Count -eq 1 -and $top[0].PSIsContainer) {
-            Get-ChildItem $top[0].FullName | Move-Item -Destination C:\obs-deps
-          } else {
-            $top | Move-Item -Destination C:\obs-deps
+          $ErrorActionPreference = 'Stop'
+          function Get-Deps($release, $asset, $destination) {
+            $raw = "C:\deps-raw\$asset"
+            New-Item -ItemType Directory -Path $raw, $destination -Force | Out-Null
+            gh release download $release --repo obsproject/obs-deps --pattern "$asset.zip" --dir $raw
+            if ($LASTEXITCODE -ne 0) { throw "could not download $asset.zip from obs-deps $release" }
+            Expand-Archive "$raw\$asset.zip" -DestinationPath "$raw\x"
+            $top = Get-ChildItem "$raw\x"
+            if ($top.Count -eq 1 -and $top[0].PSIsContainer) { $top = Get-ChildItem $top[0].FullName }
+            $top | Move-Item -Destination $destination
           }
+          Get-Deps $env:OBS_DEPS_VERSION "windows-deps-$env:OBS_DEPS_VERSION-x64" C:\obs-deps
+          Get-Deps $env:OBS_QT6_DEPS_VERSION "windows-deps-qt6-$env:OBS_QT6_DEPS_VERSION-x64" C:\obs-deps-qt6
+      - name: Qt environment
+        shell: powershell
+        run: |
+          "Qt6_DIR=C:\obs-deps-qt6" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C:\obs-deps-qt6\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # --- OBS dev libs (cached per OBS version) ---
+      # --- OBS dev libs (cached per OBS version and deps) ---
       # The expensive part: building libobs + obs-frontend-api from source. The
       # installed dev tree lives at the fixed path C:\obs-dev, so the cache stays
       # valid across runs (deps/Qt are also at fixed C:\ paths).
@@ -179,7 +249,7 @@ jobs:
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: C:\obs-dev
-          key: obsdev-win-${{ env.OBS_VERSION }}-v1
+          key: obsdev-win-${{ env.OBS_VERSION }}-${{ env.OBS_DEPS_VERSION }}-v2
       - name: Download OBS source
         if: steps.cache-obsdev.outputs.cache-hit != 'true'
         shell: cmd
@@ -222,22 +292,26 @@ jobs:
           cmake -B build -S . -A x64 ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DBUILD_TESTS=OFF ^
-            -DPLD_EXPECTED_QT=%QT_ABI% ^
+            -DPLD_EXPECTED_QT=%OBS_QT_ABI% ^
             -DCMAKE_PREFIX_PATH="C:\obs-dev;%Qt6_DIR%;C:\obs-deps"
       - name: Build plugin
         run: cmake --build build --config Release
+      # The install tree IS the package: one obs-playlist-deck folder holding
+      # the OBS 33 layout (obs-playlist-deck.dll next to data\) and the legacy
+      # one (bin\64bit\) for OBS 32 and earlier. It is meant to be extracted
+      # into C:\ProgramData\obs-studio\plugins -- the only per-install folder
+      # OBS searches on Windows.
       - name: Install plugin
-        run: cmake --install build --config Release --prefix "${{ github.workspace }}\release"
-      - name: Package (per-user layout for %APPDATA%\obs-studio\plugins)
+        run: cmake --install build --config Release --prefix "${{ github.workspace }}\pkg"
+      - name: Package (C:\ProgramData\obs-studio\plugins layout, OBS 33 + legacy)
         shell: powershell
         run: |
-          $ws = "${{ github.workspace }}"
-          $dst = "$ws\pkg\obs-playlist-deck"
-          New-Item -ItemType Directory -Force -Path "$dst\bin\64bit" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$dst\data" | Out-Null
-          Copy-Item "$ws\release\obs-plugins\64bit\*" "$dst\bin\64bit\" -Recurse -Force
-          Copy-Item "$ws\release\data\obs-plugins\obs-playlist-deck\*" "$dst\data\" -Recurse -Force
-          Compress-Archive -Path "$dst" -DestinationPath "$ws\obs-playlist-deck-windows.zip" -Force
+          $ErrorActionPreference = 'Stop'
+          $dst = "${{ github.workspace }}\pkg\obs-playlist-deck"
+          foreach ($f in 'obs-playlist-deck.dll', 'bin\64bit\obs-playlist-deck.dll', 'data\locale\en-US.ini') {
+            if (-not (Test-Path "$dst\$f")) { throw "missing from the package: obs-playlist-deck\$f" }
+          }
+          Compress-Archive -Path $dst -DestinationPath "${{ github.workspace }}\obs-playlist-deck-windows.zip" -Force
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: obs-playlist-deck-windows
@@ -255,6 +329,9 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install dependencies
         run: brew install cmake ninja
+      # OBS's own deps and Qt for OBS_VERSION; see the Windows job.
+      - name: Resolve OBS dependencies
+        run: python3 tools/obs_deps.py --obs-version "${{ env.OBS_VERSION }}" --platform macos
 
       # --- OBS prebuilt universal deps (cached) ---
       - name: Cache obs-deps
@@ -264,7 +341,7 @@ jobs:
           path: |
             /tmp/obs-deps
             /tmp/obs-deps-qt6
-          key: obsdeps-mac-universal-${{ env.OBS_DEPS_VERSION }}-v1
+          key: obsdeps-mac-universal-${{ env.OBS_DEPS_VERSION }}-qt6-${{ env.OBS_QT6_DEPS_VERSION }}-v2
       - name: Download universal OBS pre-built deps
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
@@ -273,7 +350,7 @@ jobs:
             "https://github.com/obsproject/obs-deps/releases/download/${{ env.OBS_DEPS_VERSION }}/macos-deps-${{ env.OBS_DEPS_VERSION }}-universal.tar.xz" \
             | tar -xJ -C /tmp/obs-deps
           curl -fsSL \
-            "https://github.com/obsproject/obs-deps/releases/download/${{ env.OBS_DEPS_VERSION }}/macos-deps-qt6-${{ env.OBS_DEPS_VERSION }}-universal.tar.xz" \
+            "https://github.com/obsproject/obs-deps/releases/download/${{ env.OBS_QT6_DEPS_VERSION }}/macos-deps-qt6-${{ env.OBS_QT6_DEPS_VERSION }}-universal.tar.xz" \
             | tar -xJ -C /tmp/obs-deps-qt6
 
       # --- OBS dev libs (universal, cached per OBS version) ---
@@ -289,7 +366,7 @@ jobs:
           # older minimum (or on the previous runner image, which had no
           # explicit target at all) must never be restored into a build that
           # promises a different one.
-          key: obsdev-mac-universal-${{ env.OBS_VERSION }}-${{ env.MACOS_DEPLOYMENT_TARGET }}-v2
+          key: obsdev-mac-universal-${{ env.OBS_VERSION }}-${{ env.OBS_DEPS_VERSION }}-${{ env.MACOS_DEPLOYMENT_TARGET }}-v3
       - name: Clone OBS source
         if: steps.cache-obsdev.outputs.cache-hit != 'true'
         run: |
@@ -330,6 +407,7 @@ jobs:
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTS=OFF \
+            -DPLD_EXPECTED_QT="$OBS_QT_ABI" \
             -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET="${{ env.MACOS_DEPLOYMENT_TARGET }}" \
             -Dlibobs_DIR="/tmp/obs-dev/Frameworks/libobs.framework/Resources/cmake" \
@@ -621,6 +699,7 @@ jobs:
     needs:
       - tests
       - linux
+      - linux-runtime
       - windows
       - macos
       - streamdeck
@@ -678,7 +757,8 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: release-notes.md
           files: |
-            release-assets/obs-playlist-deck-linux-x86_64.tar.gz
+            release-assets/obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz
+            release-assets/obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz
             release-assets/obs-playlist-deck-windows.zip
             release-assets/obs-playlist-deck-macos-universal.tar.gz
             release-assets/obs-playlist-deck-streamdeck.zip
@@ -693,7 +773,8 @@ jobs:
         with:
           vt_api_key: ${{ secrets.VT_API_KEY }}
           files: |
-            release-assets/obs-playlist-deck-linux-x86_64.tar.gz
+            release-assets/obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz
+            release-assets/obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz
             release-assets/obs-playlist-deck-windows.zip
             release-assets/obs-playlist-deck-macos-universal.tar.gz
             release-assets/obs-playlist-deck-streamdeck.zip

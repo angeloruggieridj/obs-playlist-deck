@@ -105,26 +105,63 @@ Download your platform's build from the
 > OBS will refuse to load the plugin. See
 > [Unsigned builds, and how to verify them](#unsigned-builds-and-how-to-verify-them).
 
+> [!NOTE]
+> **One package for OBS 30 through 33.** OBS 33 moves third-party plugins to a
+> new folder layout, and keeps loading the old one — marked *Legacy* in its
+> Plugin Manager — only until OBS 34. The Windows and Linux packages carry the
+> plugin in **both** layouts: OBS 33 loads the new copy and skips the old one,
+> while OBS 32 and earlier only ever see the old one. macOS is unchanged in
+> OBS 33.
+
 ### Windows
-Extract the zip into an OBS plugins folder, so you end up with
-`…\plugins\obs-playlist-deck\bin\64bit\obs-playlist-deck.dll` (and
-`…\obs-playlist-deck\data\`). Either location works and both survive OBS
-updates — no need to touch the OBS install folder.
+Extract the zip into `C:\ProgramData\obs-studio\plugins` — the folder OBS
+searches for plugins on Windows, for every account on the PC. It survives OBS
+updates, and the OBS install folder is never touched.
 
 ```powershell
-# Per user (recommended): no administrator rights needed
-Expand-Archive obs-playlist-deck-windows.zip -DestinationPath "$env:APPDATA\obs-studio\plugins"
-
-# Per machine: every account on the PC, may prompt for elevation
-Expand-Archive obs-playlist-deck-windows.zip -DestinationPath "$env:PROGRAMDATA\obs-studio\plugins"
+Expand-Archive obs-playlist-deck-windows.zip -DestinationPath "$env:PROGRAMDATA\obs-studio\plugins" -Force
 ```
-Then restart OBS.
+You end up with `…\plugins\obs-playlist-deck\obs-playlist-deck.dll` (OBS 33),
+`…\obs-playlist-deck\bin\64bit\obs-playlist-deck.dll` (OBS 32 and earlier) and
+`…\obs-playlist-deck\data\`. Then restart OBS. If Windows refuses to write
+there, run PowerShell as administrator.
+
+> [!IMPORTANT]
+> Versions up to 1.3.2 told you to install under `%APPDATA%\obs-studio\plugins`.
+> **OBS never loads plugins from there on Windows**, so a copy in that folder
+> did nothing. Delete it and install as above.
 
 ### Linux
+Pick the package for your Ubuntu release: the plugin uses the system FFmpeg,
+whose libraries have different names on each release, so one build cannot load
+on both.
+
+| Ubuntu | Package | OBS |
+|---|---|---|
+| 24.04 | `obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz` | 30 – 32, from the OBS PPA or OBS's `.deb` |
+| 26.04 | `obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz` | 32 – 33, from the OBS PPA, OBS's `.deb` or Ubuntu |
+
+The packages are built against OBS's own `.deb`. Ubuntu 24.04's *own*
+`obs-studio` package names its core library differently (`libobs.so.0`, where
+OBS's builds use `libobs.so.30`), so the plugin does not load into it — install
+OBS from its PPA instead.
+
+Extract it into your home folder — no `sudo`:
 ```bash
-sudo tar -xzf obs-playlist-deck-linux-x86_64.tar.gz -C /
+tar -xzf obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz -C ~
 ```
-For a system OBS install (not Flatpak/Snap).
+Then restart OBS. The plugin lands in `~/.local/share/obs-studio/plugins`
+(OBS 33) and `~/.config/obs-studio/plugins` (OBS 32 and earlier), which OBS
+searches however it was installed: from the OBS PPA, from Ubuntu's own package,
+or from the `.deb` on OBS's GitHub releases (which installs under `/usr/local`).
+Flatpak and Snap builds of OBS are not covered. OBS 33 no longer publishes
+packages for Ubuntu 24.04.
+
+> [!IMPORTANT]
+> Versions up to 1.3.2 were installed with `sudo tar … -C /` into
+> `/usr/lib/obs-plugins`, a folder OBS on Ubuntu does not search — so they did
+> not load. You can remove the leftovers:
+> `sudo rm -rf /usr/lib/obs-plugins/libobs-playlist-deck.so /usr/share/obs/obs-plugins/obs-playlist-deck`
 
 ### macOS (universal)
 ```bash
@@ -325,8 +362,8 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 | **Verified by** | Compile and link against each version's OBS SDK in CI — not a runtime test. |
 | **Built against** | 32.2.2 |
 | **Also builds against** | 33.0.0-beta4 (prerelease, not supported) |
-| **Platforms** | Windows x64, Linux x86_64, macOS universal (Intel + Apple Silicon) |
-| **Qt** | Qt 6 |
+| **Platforms** | Windows x64, Linux x86_64 (Ubuntu 24.04 and 26.04), macOS universal (Intel + Apple Silicon) |
+| **Qt** | Qt 6 — on Windows and macOS, the exact Qt the targeted OBS ships |
 
 <details>
 <summary>Every OBS version CI probed</summary>
@@ -348,6 +385,13 @@ Generated from [`obs-compat.json`](obs-compat.json) by `tools/obs_compat.py`.
 </details>
 <!-- obs-compat:end -->
 
+**OBS 33 is supported only partially, while it is in beta.** The plugin compiles
+and links against 33.0.0-beta4, and CI checks that the Linux package resolves
+every library and symbol it needs inside OBS's own 33 beta package for Ubuntu
+26.04. That is not the same as running a show on it: full compatibility will be
+tested again, and declared in the table above, when OBS 33 is released to the
+public.
+
 ## Building from source
 
 Requires CMake ≥ 3.22, a C++17 compiler, Qt 6, and OBS development files
@@ -356,6 +400,20 @@ Requires CMake ≥ 3.22, a C++17 compiler, Qt 6, and OBS development files
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+```
+
+The install rules lay the plugin out the way OBS looks for it, in both the
+OBS 33 and the legacy layout, so installing with the right prefix is a working
+install:
+```powershell
+# Windows
+cmake --install build --config Release --prefix "$env:PROGRAMDATA\obs-studio\plugins"
+```
+```bash
+# Linux, per user (the layout the release package uses)
+cmake --install build --prefix "$HOME"
+# Linux, system-wide under /usr, for distribution packagers
+cmake -B build -DPLD_LINUX_LAYOUT=system && sudo cmake --install build
 ```
 
 Unit tests (no OBS/Qt needed):
@@ -368,8 +426,11 @@ ctest --test-dir build-tests --output-on-failure
 CI ([`.github/workflows/build_project.yml`](.github/workflows/build_project.yml))
 runs the unit tests plus the locale and version checks, builds OBS dev libraries
 from source (cached per OBS version) and the plugin per platform, renders the
-Stream Deck icons and packages the companion, and runs an on-demand `compat`
-matrix against older OBS SDKs. See [`docs/superpowers/`](docs/superpowers/) for
+Stream Deck icons and packages the companion, checks that each Linux package
+loads into OBS's own published `.deb` for its Ubuntu release, and runs an
+on-demand `compat` matrix against older OBS SDKs. The Windows and macOS builds
+use the dependencies and the Qt that `OBS_VERSION` itself declares
+([`tools/obs_deps.py`](tools/obs_deps.py)). See [`docs/superpowers/`](docs/superpowers/) for
 the design spec and plan, [docs/decisions.md](docs/decisions.md) for why the
 plugin is built the way it is, and [CONTRIBUTING.md](CONTRIBUTING.md) for the
 working agreement (one finding, one PR, one CHANGELOG entry).

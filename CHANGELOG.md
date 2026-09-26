@@ -5,6 +5,89 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] — 2026-09-26
+
+Getting ready for OBS 33, which changes where plugins live, and fixing what
+preparing for it brought to light — three of which meant the plugin, installed
+as documented, silently did not load at all.
+
+**OBS 33 is supported only partially while it is in beta.** The plugin compiles
+and links against 33.0.0-beta4, and the Linux package is checked against OBS's
+own 33 beta package for Ubuntu 26.04. It has not been run in a show on OBS 33:
+full compatibility will be tested again, and declared, when OBS 33 is released
+to the public. The supported range stays **OBS 30.0 – 32.2.2**.
+
+### Fixed
+
+- **The Linux package never loaded.** It put the plugin in
+  `/usr/lib/obs-plugins/libobs-playlist-deck.so`, and no OBS on Ubuntu looks
+  there: the OBS PPA and Ubuntu's package use `/usr/lib/x86_64-linux-gnu`, and
+  OBS's own `.deb` installs under `/usr/local`. The build asked CMake for the
+  multiarch library folder before setting the `/usr` prefix, and CMake only
+  picks it for `/usr`. And OBS names a module after its file, so even found it
+  would have been "libobs-playlist-deck", looking for its data in a folder that
+  does not exist. The package is now **installed per user** (`tar -xzf … -C ~`,
+  no `sudo`) into the folders every OBS searches whatever its own install
+  prefix, and the file is `obs-playlist-deck.so`. CI now installs OBS's own
+  `.deb` and checks that the plugin is where OBS looks, under the right name,
+  next to its data, with every library and symbol resolved.
+- **The Linux build linked the wrong libobs.** It was compiled against Ubuntu's
+  `libobs-dev`, whose library is `libobs.so.0` on 24.04; OBS's own builds (the
+  PPA, and the `.deb` on its releases) call it `libobs.so.30`, so the plugin
+  could not have loaded into them even from the right folder. Each Linux package
+  is now built against OBS's own `.deb` for its Ubuntu, and CI checks the result
+  links `libobs.so.30`. The flip side: Ubuntu 24.04's own `obs-studio` package
+  (OBS 30.0) is not supported — the README points to the PPA.
+- **The recommended Windows install location never worked.** The README told
+  you to extract the zip into `%APPDATA%\obs-studio\plugins`, and 1.3.0's notes
+  called it the layout the package had always been built for. OBS has never
+  searched that folder on Windows — it looks in `C:\ProgramData\obs-studio\plugins`
+  (and the `OBS_PLUGINS_PATH` variable), in 32 and in 33 alike — so a plugin
+  installed as recommended simply did not load. The instructions now name
+  `C:\ProgramData\obs-studio\plugins` only, and tell anyone with a copy under
+  `%APPDATA%` to delete it.
+- **The Linux package could not load on Ubuntu 26.04**, the only Ubuntu OBS 33
+  ships for. It was built on 24.04 and linked that release's FFmpeg
+  (`libavformat.so.60`); 26.04 ships FFmpeg 8 (`libavformat.so.62`), so the
+  dynamic linker refused the plugin before OBS could load it. There are now two
+  Linux packages, each built on its own Ubuntu against OBS's `.deb` for it:
+  `…-ubuntu-24.04-…` and `…-ubuntu-26.04-…`.
+- **The Windows and macOS builds used a different Qt from OBS.** Windows was
+  compiled against Qt 6.7.3 and macOS against the obs-deps release of August
+  2025 (Qt 6.8.3), while OBS 32.2 ships Qt 6.11.1 on both. The guard meant to
+  stop exactly this compared the Qt the build found against a second number
+  typed in by hand, so it agreed with the mistake. Both jobs now take the
+  dependencies — and Qt — that `OBS_VERSION`'s own `CMakePresets.json` names
+  (`tools/obs_deps.py`), and the guard checks against the Qt version read from
+  obs-deps, a source independent of the Qt the build actually finds. The guard
+  is now enforced on macOS too.
+- **The OBS compatibility check had been failing every day since OBS
+  33.0.0-beta3.** Nothing was wrong with the plugin: OBS 33's SDK could not be
+  built in CI. OBS 33 renamed the `ENABLE_PLUGINS` build option to
+  `ENABLE_CORE_MODULES`, and with it off a file libobs needs
+  (`obs-core-modules.c`) is never generated. Both are handled, on every
+  platform's SDK build.
+
+### Changed
+
+- **The plugin ships in OBS 33's new folder layout and in the old one.** OBS 33
+  looks for `…\plugins\obs-playlist-deck\obs-playlist-deck.dll` on Windows and
+  `~/.local/share/obs-studio/plugins/obs-playlist-deck/` on Linux; the old
+  layout is still loaded, marked *Legacy*, but not from OBS 34 onwards. The
+  Windows zip and the Linux packages carry both: OBS 33 loads the new copy first and skips
+  the legacy one as a duplicate (a line in its log, not a failure), while OBS 32
+  and earlier never look at the new path. Extracting over a previous install
+  upgrades it in place. macOS is unchanged in OBS 33.
+
+### Added
+
+- **CI checks that the Linux packages load into the OBS people install.** For
+  `OBS_VERSION` and for the newest beta, it installs every Ubuntu `.deb` OBS
+  publishes into a container of that Ubuntu, unpacks the matching package into
+  the home folder as the README says, and has the dynamic linker resolve every
+  library and symbol the plugin imports, in both layouts. A failure against the release OBS blocks a release;
+  one against a beta is reported.
+
 ## [1.3.2] — 2026-08-31
 
 A fix for a regression 1.3.1 introduced, and the features the deck was missing
@@ -555,6 +638,7 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
+[1.3.3]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.2.6...v1.3.0
