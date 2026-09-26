@@ -312,10 +312,64 @@ jobs:
             if (-not (Test-Path "$dst\$f")) { throw "missing from the package: obs-playlist-deck\$f" }
           }
           Compress-Archive -Path $dst -DestinationPath "${{ github.workspace }}\obs-playlist-deck-windows.zip" -Force
+      # The installer packs the very same tree into the same folder
+      # (installer/obs-playlist-deck.iss). Its version is read from
+      # CMakeLists.txt, like the macOS bundle's, so it cannot drift.
+      - name: Build installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(obs-playlist-deck VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          if (-not $version) { throw "could not read the project version" }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DAppVersion=$version" `
+            "/DPkgDir=${{ github.workspace }}\pkg" "/O${{ github.workspace }}" installer\obs-playlist-deck.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          "INSTALLER_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      # Not a build check: the installer is run for real on the runner, the
+      # way a user would, and what it leaves on disk is inspected. Install,
+      # install again over it (the upgrade path), uninstall.
+      - name: Installer really installs, upgrades and uninstalls
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = "${{ github.workspace }}\obs-playlist-deck-windows-setup.exe"
+          $app = "$env:ProgramData\obs-studio\plugins\obs-playlist-deck"
+          $legacy = "$env:APPDATA\obs-studio\plugins\obs-playlist-deck"
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{5F029470-E628-4130-9BF0-C62083EEA147}_is1'
+          # A dead copy where 1.3.2's README put it: the default task removes it.
+          New-Item -ItemType Directory -Force -Path "$legacy\bin\64bit" | Out-Null
+          Set-Content "$legacy\bin\64bit\obs-playlist-deck.dll" 'stale'
+          foreach ($pass in 'install', 'upgrade') {
+            $p = Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\setup-$pass.log" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup-$pass.log"; throw "$pass exited with $($p.ExitCode)" }
+            foreach ($f in 'obs-playlist-deck.dll', 'bin\64bit\obs-playlist-deck.dll', 'data\locale\en-US.ini', 'uninstall\unins000.exe') {
+              if (-not (Test-Path "$app\$f")) { throw "after $pass, missing: $app\$f" }
+            }
+            $shipped = (Get-FileHash "${{ github.workspace }}\pkg\obs-playlist-deck\obs-playlist-deck.dll").Hash
+            foreach ($dll in "$app\obs-playlist-deck.dll", "$app\bin\64bit\obs-playlist-deck.dll") {
+              if ((Get-FileHash $dll).Hash -ne $shipped) { throw "after $pass, $dll is not the built plugin" }
+            }
+            $shown = (Get-ItemProperty $key).DisplayVersion
+            if ($shown -ne $env:INSTALLER_VERSION) { throw "Apps & features shows $shown, expected $env:INSTALLER_VERSION" }
+            "ok: $pass"
+          }
+          if (Test-Path $legacy) { throw "the %APPDATA% copy was not removed" }
+          "ok: the %APPDATA% copy was removed"
+          # The uninstaller relaunches itself from %TEMP% and returns at once,
+          # so wait for its effect rather than for the process.
+          Start-Process "$app\uninstall\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          $deadline = (Get-Date).AddSeconds(120)
+          while ((Test-Path $app) -or (Test-Path $key)) {
+            if ((Get-Date) -gt $deadline) { throw "uninstall left $app or its Apps & features entry behind" }
+            Start-Sleep -Seconds 2
+          }
+          "ok: uninstalled, nothing left behind"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: obs-playlist-deck-windows
-          path: obs-playlist-deck-windows.zip
+          path: |
+            obs-playlist-deck-windows.zip
+            obs-playlist-deck-windows-setup.exe
 
   macos:
     name: macOS universal
@@ -760,6 +814,7 @@ jobs:
             release-assets/obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz
             release-assets/obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz
             release-assets/obs-playlist-deck-windows.zip
+            release-assets/obs-playlist-deck-windows-setup.exe
             release-assets/obs-playlist-deck-macos-universal.tar.gz
             release-assets/obs-playlist-deck-streamdeck.zip
             release-assets/*.streamDeckPlugin
@@ -776,6 +831,7 @@ jobs:
             release-assets/obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz
             release-assets/obs-playlist-deck-linux-ubuntu-26.04-x86_64.tar.gz
             release-assets/obs-playlist-deck-windows.zip
+            release-assets/obs-playlist-deck-windows-setup.exe
             release-assets/obs-playlist-deck-macos-universal.tar.gz
             release-assets/obs-playlist-deck-streamdeck.zip
       # The action's own update_release_body only fires on a "release" event, and
