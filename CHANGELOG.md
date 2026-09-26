@@ -5,6 +5,18 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The release job's VirusTotal scan runs on Node 24.** The action was pinned to
+  v4.2.0, which targets Node 20; GitHub is retiring Node 20 on its runners and
+  was already forcing the action onto Node 24 with a deprecation warning. It is
+  now pinned to v5.0.0, which targets Node 24 itself, with the same inputs and
+  the same `analysis` output the release notes are built from. Every other
+  action the workflows use, including those inside the provenance attestation,
+  already targets Node 24.
+
 ## [1.3.4] — 2026-09-26
 
 A Windows installer, so the plugin no longer has to be unpacked by hand into
@@ -676,6 +688,7 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
+[Unreleased]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.4...HEAD
 [1.3.4]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.1...v1.3.2
