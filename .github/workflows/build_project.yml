@@ -190,8 +190,10 @@ jobs:
         if: steps.cache-obsdev.outputs.cache-hit != 'true'
         shell: cmd
         run: |
+          rem ENABLE_CORE_MODULES is OBS 33's name for ENABLE_PLUGINS; see obs-compat-probe.
           cmake -B C:\obs-build -S "C:\obs-studio-${{ env.OBS_VERSION }}" -A x64 ^
             -DENABLE_PLUGINS=OFF ^
+            -DENABLE_CORE_MODULES=OFF ^
             -DENABLE_SCRIPTING=OFF ^
             -DENABLE_BROWSER=OFF ^
             -DENABLE_UPDATER=OFF ^
@@ -296,6 +298,7 @@ jobs:
           cmake -B /tmp/obs-build -S /tmp/obs \
             -G Xcode \
             -DENABLE_PLUGINS=OFF \
+            -DENABLE_CORE_MODULES=OFF \
             -DENABLE_SCRIPTING=OFF \
             -DENABLE_BROWSER=OFF \
             -DENABLE_VLC=OFF \
