@@ -101,10 +101,19 @@ elseif(APPLE)
   set(OBS_PLUGIN_DESTINATIONS "obs-plugins")
   set(OBS_DATA_DESTINATIONS   "obs-plugins/obs-playlist-deck")
 else()
-  include(GNUInstallDirs)
+  # The prefix must be /usr BEFORE GNUInstallDirs runs: it only picks the
+  # multiarch libdir (lib/x86_64-linux-gnu, where Ubuntu's OBS looks) for a
+  # /usr prefix, and caches the answer. Included first, it saw /usr/local and
+  # settled on plain "lib", so every package up to 1.3.2 put the plugin in
+  # /usr/lib/obs-plugins -- a folder OBS on Ubuntu never searches.
   if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install path prefix." FORCE)
   endif()
+  include(GNUInstallDirs)
+  # OBS names a module after its file, minus only the extension, and looks
+  # for its data under that name: libobs-playlist-deck.so would be module
+  # "libobs-playlist-deck", with no data folder of that name.
+  set_target_properties(obs-playlist-deck PROPERTIES PREFIX "")
   set(OBS_PLUGIN_DESTINATIONS
     "${CMAKE_INSTALL_LIBDIR}/obs-modules/plugins"
     "${CMAKE_INSTALL_LIBDIR}/obs-plugins")

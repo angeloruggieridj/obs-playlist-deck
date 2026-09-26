@@ -7,9 +7,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [1.3.3] — 2026-09-26
 
-Getting ready for OBS 33, which changes where plugins live, and fixing four
-things that preparing for it brought to light — two of which meant the plugin
-could silently fail to load at all.
+Getting ready for OBS 33, which changes where plugins live, and fixing what
+preparing for it brought to light — three of which meant the plugin, installed
+as documented, silently did not load at all.
 
 **OBS 33 is supported only partially while it is in beta.** The plugin compiles
 and links against 33.0.0-beta4, and the Linux package is checked against OBS's
@@ -19,6 +19,16 @@ to the public. The supported range stays **OBS 30.0 – 32.2.2**.
 
 ### Fixed
 
+- **The Linux package never loaded into OBS installed from its Ubuntu
+  package.** It put the plugin in `/usr/lib/obs-plugins/libobs-playlist-deck.so`.
+  OBS on Ubuntu looks in `/usr/lib/x86_64-linux-gnu/obs-plugins`, and names a
+  module after its file, so even found there it would have been
+  "libobs-playlist-deck", looking for data in a folder that does not exist. The
+  build asked CMake for the multiarch library folder before setting the `/usr`
+  prefix, and CMake only picks that folder for `/usr`; and Linux libraries get a
+  `lib` prefix unless told otherwise. Both are fixed, and CI now installs OBS's
+  own package and checks that the plugin is where OBS looks, under the right
+  name, next to its data.
 - **The recommended Windows install location never worked.** The README told
   you to extract the zip into `%APPDATA%\obs-studio\plugins`, and 1.3.0's notes
   called it the layout the package had always been built for. OBS has never

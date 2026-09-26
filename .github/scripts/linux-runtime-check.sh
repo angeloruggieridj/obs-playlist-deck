@@ -43,8 +43,15 @@ check_version() {
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "./debs/$1" > /dev/null
         tar -xzf "$2" -C /
         status=0
-        for so in /usr/lib/x86_64-linux-gnu/obs-modules/plugins/obs-playlist-deck.so \
-                  /usr/lib/x86_64-linux-gnu/obs-plugins/obs-playlist-deck.so; do
+        # Each copy must sit where that OBS looks, under the module name OBS
+        # derives from the file name, next to a data folder of the same name.
+        for pair in \
+            /usr/lib/x86_64-linux-gnu/obs-modules/plugins/obs-playlist-deck.so:/usr/share/obs/obs-modules/plugins/obs-playlist-deck \
+            /usr/lib/x86_64-linux-gnu/obs-plugins/obs-playlist-deck.so:/usr/share/obs/obs-plugins/obs-playlist-deck; do
+          so="${pair%%:*}" data="${pair#*:}"
+          if [ ! -f "$so" ] || [ ! -f "$data/locale/en-US.ini" ]; then
+            echo "missing: $so or $data/locale/en-US.ini"; status=1; continue
+          fi
           out="$(ldd -r "$so" 2>&1)"
           if printf "%s\n" "$out" | grep -E "not found|undefined symbol"; then
             echo "unresolved imports in $so"; status=1
