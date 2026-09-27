@@ -9,6 +9,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The project is now licensed under the GNU GPL v2.0 or later**
+  (`GPL-2.0-or-later`), the same license as OBS Studio, replacing MIT. The
+  `LICENSE` file, the SPDX identifier on every source file, the README and the
+  verification notes all say so. Releases up to and including 1.3.4 remain
+  available under MIT.
 - **The release job's VirusTotal scan runs on Node 24.** The action was pinned to
   v4.2.0, which targets Node 20; GitHub is retiring Node 20 on its runners and
   was already forcing the action onto Node 24 with a deprecation warning. It is

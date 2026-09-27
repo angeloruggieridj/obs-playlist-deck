@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include "PlaylistIO.hpp"
 #include "MediaPath.hpp"
 #include <nlohmann/json.hpp>

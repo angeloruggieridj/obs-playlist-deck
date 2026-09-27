@@ -7,7 +7,7 @@
 [![Build](https://github.com/angeloruggieridj/obs-playlist-deck/actions/workflows/build_project.yml/badge.svg)](https://github.com/angeloruggieridj/obs-playlist-deck/actions/workflows/build_project.yml)
 [![Latest release](https://img.shields.io/github/v/release/angeloruggieridj/obs-playlist-deck?include_prereleases&sort=semver)](https://github.com/angeloruggieridj/obs-playlist-deck/releases)
 [![Downloads](https://img.shields.io/github/downloads/angeloruggieridj/obs-playlist-deck/total)](https://github.com/angeloruggieridj/obs-playlist-deck/releases)
-[![License: MIT](https://img.shields.io/github/license/angeloruggieridj/obs-playlist-deck)](LICENSE)
+[![License: GPL v2+](https://img.shields.io/github/license/angeloruggieridj/obs-playlist-deck)](LICENSE)
 
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20universal-blue)
 ![OBS](https://img.shields.io/badge/OBS%20Studio-30.0%2B-302e31?logo=obsstudio)
@@ -464,4 +464,5 @@ Release-by-release notes live in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GNU General Public License v2.0 or later (GPL-2.0-or-later), the same license as
+OBS Studio — see [LICENSE](LICENSE).

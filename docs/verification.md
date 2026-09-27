@@ -68,6 +68,6 @@ why the provenance attestation matters more than a scan.
 > Provenance attestations are produced from **v1.2.6 onwards**. Earlier releases
 > have GitHub's asset digests but no attestation.
 
-Finally, nothing here is a black box: the plugin is MIT-licensed, the full source
+Finally, nothing here is a black box: the plugin is GPL-licensed (GPL-2.0-or-later), the full source
 is in this repository, and you can always
 [build it yourself](../README.md#building-from-source).
