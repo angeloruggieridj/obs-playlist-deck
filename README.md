@@ -466,3 +466,7 @@ Release-by-release notes live in [CHANGELOG.md](CHANGELOG.md).
 
 GNU General Public License v2.0 or later (GPL-2.0-or-later), the same license as
 OBS Studio — see [LICENSE](LICENSE).
+
+This covers every release. Versions up to and including 1.3.4 were first
+published under MIT and are now offered under GPL-2.0-or-later too; copies
+obtained under MIT keep the rights that license granted.
