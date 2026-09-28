@@ -320,19 +320,28 @@ script.
 | `AddPaths` | `{ paths: [{ value }] }` | Append media files |
 | `Clear` | — | Empty the playlist |
 | `GetStatus` | — | See below |
-| `GetItems` | `{ from, to }` | Titles and paths, paginated |
+| `GetItems` | `{ from, to }` | `index`, `title`, `path` and `durationMs` of each item, paginated |
 
 `GetStatus` answers with `ok`, `count`, `currentIndex` — the fields it has always
 had — plus `currentTitle`, `currentPath`, `positionMs`, `durationMs`, `playing`,
 `paused`, `muted`, `sourceBound`, `sourceName`, `mode`, `modeName`,
 `playlistName`, `playlistIndex`, `scheduledStartMs`, `upNextIndex`,
-`upNextTitle` and `pluginVersion`. Nothing was removed, so existing scripts keep
-working.
+`upNextTitle`, `totalDurationMs`, `unknownDurationCount` and `pluginVersion`.
+Nothing was removed, so existing scripts keep working. `durationMs` is `-1`
+wherever the duration is not known yet (not probed, probing disabled, or the
+probe failed); `totalDurationMs` adds up only the known ones, and
+`unknownDurationCount` says how many it left out.
 
 The deck also **emits events**, so a client can follow playback instead of
 polling: `item-started` (`index`, `title`, `path`, `durationMs`),
 `playback-state` (`playing`, `positionMs`, `durationMs`, `index`, about once a
-second), `mute-changed` (`muted`) and `playlist-completed`.
+second), `mute-changed` (`muted`), `playlist-completed` and `playlist-changed`
+(`reason`, `playlistName`, `count`). `playlist-changed` fires whenever the item
+list changes, so a client can call `GetItems` again instead of polling it;
+`reason` is one of `added`, `removed`, `moved`, `renamed`, `cleared`, `loaded`,
+`switched` (another playlist in the library became active), `undo`, `redo`,
+`healed` (*Find moved files* repointed items), `durations-updated` (a
+background probe or playback filled in durations) and `playlist-renamed`.
 
 An Elgato **Stream Deck companion** lives in [`streamdeck/`](streamdeck/) with
 Next / Previous / Play-Pause / Stop / Mute / Panic / Play Item actions (buildless JS). It

@@ -259,6 +259,8 @@ static void ws_get_status(obs_data_t*, obs_data_t* resp, void*) {
     obs_data_set_int(resp, "scheduledStartMs", s.scheduledStartMs);
     obs_data_set_int(resp, "upNextIndex", s.upNextIndex);
     obs_data_set_string(resp, "upNextTitle", s.upNextTitle.toUtf8().constData());
+    obs_data_set_int(resp, "totalDurationMs", s.totalDurationMs);
+    obs_data_set_int(resp, "unknownDurationCount", s.unknownDurationCount);
     obs_data_set_string(resp, "pluginVersion", PLD_VERSION);
     obs_data_set_bool(resp, "ok", true);
 }
@@ -281,8 +283,9 @@ static void ws_get_items(obs_data_t* req, obs_data_t* resp, void*) {
     for (int i = from; i <= to; ++i) {
         obs_data_t* entry = obs_data_create();
         obs_data_set_int(entry, "index", i);
-        obs_data_set_string(entry, "title", s.items[i].first.toUtf8().constData());
-        obs_data_set_string(entry, "path", s.items[i].second.toUtf8().constData());
+        obs_data_set_string(entry, "title", s.items[i].title.toUtf8().constData());
+        obs_data_set_string(entry, "path", s.items[i].path.toUtf8().constData());
+        obs_data_set_int(entry, "durationMs", s.items[i].durationMs);
         obs_data_array_push_back(arr, entry);
         obs_data_release(entry);
     }

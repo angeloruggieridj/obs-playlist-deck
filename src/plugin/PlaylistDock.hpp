@@ -62,8 +62,17 @@ struct DeckStatus {
     int upNextIndex = -1;
     QString upNextTitle;
     long long scheduledStartMs = -1;
-    // title/path pairs, for the paginated GetItems request.
-    QList<QPair<QString, QString>> items;
+    // Running time of the whole playlist, and how many items it leaves out
+    // because their duration is not known yet.
+    long long totalDurationMs = 0;
+    int unknownDurationCount = 0;
+    // One entry per item, for the paginated GetItems request.
+    struct Item {
+        QString title;
+        QString path;
+        long long durationMs = -1; // -1 while unknown
+    };
+    QList<Item> items;
 };
 
 // Plain widget, not a QDockWidget: OBS wraps it in its own dock through
@@ -211,10 +220,14 @@ private:
     void snapshotStatus();
     void snapshotPlayback(); // just the volatile fields, for the twice-a-second tick
     void emitVendorItemStarted();
+    // Tells remote clients the item list changed, so they re-read GetItems
+    // instead of polling it. Call after the snapshot is up to date.
+    void emitPlaylistChanged(const char* reason);
 
     // Records the state before a destructive edit so Ctrl+Z can bring it back.
     void recordUndo(const QString& label);
-    void applyHistoryState(std::vector<pld::PlaylistItem> items, int current);
+    void applyHistoryState(std::vector<pld::PlaylistItem> items, int current,
+                           const char* reason);
 
     // Reads the duration from the source once it reports the clip started, and
     // only for the item that was actually scheduled — a fixed timer used to
