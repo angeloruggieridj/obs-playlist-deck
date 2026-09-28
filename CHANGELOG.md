@@ -7,6 +7,42 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-28
+
+Remote clients can now follow the whole playlist, not only the clip on air:
+every item's duration over obs-websocket, and an event whenever the list
+changes. Built for rundown and clock tools that import a Playlist Deck playlist
+([#28](https://github.com/angeloruggieridj/obs-playlist-deck/issues/28)). The
+compatibility is unchanged: **OBS 30.0 – 32.2.2**, with OBS 33 supported
+partially while it is in beta.
+
+### Added
+
+- **`GetItems` returns each item's `durationMs`.** The deck already knew it —
+  probed at import, shown in the list, exported to JSON, CSV and M3U — but the
+  websocket only gave the duration of the clip playing. It is `-1` while
+  unknown: not probed yet, probing disabled, or the probe failed. `index`,
+  `title` and `path` are unchanged.
+- **`playlist-changed` vendor event**, with `reason`, `playlistName` and
+  `count`. It fires on every change to the item list — `added`, `removed`,
+  `moved`, `renamed`, `cleared`, `loaded`, `switched`, `undo`, `redo`,
+  `healed` — with `durations-updated` when a background probe or playback
+  fills in durations, and with `playlist-renamed` when the playlist itself is
+  renamed. The event carries no items: the client calls `GetItems` again,
+  which by then already reflects the change. Remote `AddPaths`, `Move`,
+  `Remove`, `Clear`, `Load` and `SwitchPlaylist` raise it like the dock's own
+  buttons do.
+- **`GetStatus` reports the running time**: `totalDurationMs`, the sum of the
+  known durations, and `unknownDurationCount`, how many items it leaves out —
+  the same figures the dock's footer shows.
+
+### Fixed
+
+- **A remote `Move` with an index out of range left an undo step behind** that
+  undid nothing. It now records one only when an item actually moved.
+- **Renaming a playlist left `GetStatus` reporting its old name** until
+  something else refreshed the status.
+
 ### Changed
 
 - **The project is now licensed under the GNU GPL v2.0 or later**
@@ -694,7 +730,8 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
-[Unreleased]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.4...HEAD
+[Unreleased]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.4...v1.4.0
 [1.3.4]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.1...v1.3.2

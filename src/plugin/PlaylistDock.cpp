@@ -917,6 +917,7 @@ void PlaylistDock::captureDuration() {
     playlist_.setItemsKeepCurrent(std::move(items));
     rebuildList();
     updateNowPlaying();
+    emitPlaylistChanged("durations-updated");
 }
 
 void PlaylistDock::onMediaStarted() {
@@ -966,12 +967,14 @@ void PlaylistDock::recordUndo(const QString& label) {
     if (undoBtn_) undoBtn_->setEnabled(true);
 }
 
-void PlaylistDock::applyHistoryState(std::vector<pld::PlaylistItem> items, int current) {
+void PlaylistDock::applyHistoryState(std::vector<pld::PlaylistItem> items, int current,
+                                     const char* reason) {
     playlist_.setItems(std::move(items));
     playlist_.setCurrent(current);
     engine_.playlistChanged();
     rebuildList();
     updateNowPlaying();
+    emitPlaylistChanged(reason);
 }
 
 void PlaylistDock::onUndo() {
@@ -982,7 +985,7 @@ void PlaylistDock::onUndo() {
         setStatus(T("Status.NothingToUndo"), StatusKind::Info);
         return;
     }
-    applyHistoryState(std::move(items), current);
+    applyHistoryState(std::move(items), current, "undo");
     setStatus(T("Status.Undone").arg(QString::fromStdString(label)), StatusKind::Info);
 }
 
@@ -991,7 +994,7 @@ void PlaylistDock::onRedo() {
     int current = playlist_.currentIndex();
     std::string label;
     if (!history_.redo(items, current, label)) return;
-    applyHistoryState(std::move(items), current);
+    applyHistoryState(std::move(items), current, "redo");
     setStatus(T("Status.Redone").arg(QString::fromStdString(label)), StatusKind::Info);
 }
 
@@ -1014,6 +1017,7 @@ void PlaylistDock::addPaths(const QStringList& paths, bool undoable) {
         playlist_.add(PlaylistItem{f.toStdString(), mediapath::fileStem(f.toStdString()), -1});
     engine_.playlistChanged();
     rebuildList();
+    emitPlaylistChanged("added");
     setStatus(T("Status.Added").arg(added.size()), StatusKind::Success);
     startScan(added);
 }
@@ -1073,6 +1077,7 @@ void PlaylistDock::onScanResults(const QList<ScanResult>& results) {
         rebuildList();
     }
     updateNowPlaying();
+    if (changed) emitPlaylistChanged("durations-updated");
 }
 
 void PlaylistDock::onRecheckFiles() {
@@ -1141,6 +1146,7 @@ void PlaylistDock::onFindMoved() {
     engine_.playlistChanged();
     rescanAll();
     rebuildList();
+    emitPlaylistChanged("healed");
     setStatus(T("Status.Healed").arg(healed), StatusKind::Success);
 }
 
@@ -1208,6 +1214,7 @@ void PlaylistDock::onRowsMoved(const QVector<int>& rows, int destination) {
     engine_.playlistChanged();
     rebuildList();
     updateNowPlaying();
+    emitPlaylistChanged("moved");
 }
 
 void PlaylistDock::onRemove() {
@@ -1239,6 +1246,7 @@ void PlaylistDock::removeRows(std::vector<int> rows) {
     engine_.playlistChanged();
     rebuildList();
     updateNowPlaying();
+    emitPlaylistChanged("removed");
 }
 
 void PlaylistDock::onUp() {
@@ -1248,6 +1256,7 @@ void PlaylistDock::onUp() {
         rebuildList();
         list_->setCurrentIndex(model_->index(r - 1));
         updateNowPlaying();
+        emitPlaylistChanged("moved");
     }
 }
 
@@ -1258,6 +1267,7 @@ void PlaylistDock::onDown() {
         rebuildList();
         list_->setCurrentIndex(model_->index(r + 1));
         updateNowPlaying();
+        emitPlaylistChanged("moved");
     }
 }
 
@@ -1271,6 +1281,7 @@ void PlaylistDock::onClear() {
     existsCache_.clear();
     rebuildList();
     updateNowPlaying();
+    emitPlaylistChanged("cleared");
     setStatus(T("Status.Cleared"), StatusKind::Info);
 }
 
@@ -1288,6 +1299,7 @@ void PlaylistDock::onItemRenamed(int index, const QString& title) {
         setStatus(T("Status.Renamed").arg(title), StatusKind::Info);
     rebuildList();
     updateNowPlaying();
+    emitPlaylistChanged("renamed");
 }
 
 void PlaylistDock::onContextMenu(const QPoint& pos) {
@@ -1311,6 +1323,7 @@ void PlaylistDock::onContextMenu(const QPoint& pos) {
             recordUndo(T("Edit.Rename"));
             playlist_.setTitle(idx, mediapath::fileStem(playlist_.items()[idx].path));
             rebuildList();
+            emitPlaylistChanged("renamed");
         });
         add(":/icons/minus.svg", T("Menu.Remove"), &PlaylistDock::onRemove);
         menu.addSeparator();
@@ -1438,6 +1451,7 @@ void PlaylistDock::activateLibraryEntry(int index) {
         }
     }
     updateNowPlaying();
+    emitPlaylistChanged("switched");
     applyWatchFolder();
     startScan(toScan, /*replacesPlaylist=*/true);
 }
@@ -1493,6 +1507,8 @@ void PlaylistDock::onPlaylistMenu() {
         library_.rename(library_.activeIndex(), name.trimmed().toStdString());
         updatePlaylistCombo();
         saveLibraryNow();
+        snapshotStatus(); // GetStatus reports the playlist's name
+        emitPlaylistChanged("playlist-renamed");
     });
     add(T("Menu.PlaylistDuplicate"), [this]() {
         commitToLibrary();
@@ -1680,11 +1696,16 @@ void PlaylistDock::wsSave(const QString& path) {
     }
 }
 void PlaylistDock::wsMove(int from, int to) {
-    recordUndo(T("Edit.Move"));
+    // An out-of-range request changes nothing, so it leaves no undo step behind.
+    auto before = playlist_.items();
+    const int current = playlist_.currentIndex();
     if (!playlist_.move(from, to)) return;
+    history_.push(std::move(before), current, T("Edit.Move").toStdString());
+    if (undoBtn_) undoBtn_->setEnabled(true);
     engine_.playlistChanged();
     rebuildList();
     updateNowPlaying();
+    emitPlaylistChanged("moved");
 }
 void PlaylistDock::wsRemove(int index) { removeRows({index}); }
 void PlaylistDock::wsSwitchPlaylist(const QString& name) {
@@ -1731,9 +1752,12 @@ void PlaylistDock::snapshotStatus() {
         s.upNextTitle = QString::fromStdString(playlist_.items()[s.upNextIndex].title);
     else
         s.upNextIndex = -1;
+    s.totalDurationMs = playlist_.totalDurationMs();
+    s.unknownDurationCount = playlist_.unknownDurationCount();
     s.items.reserve(playlist_.size());
     for (const auto& it : playlist_.items())
-        s.items.append({QString::fromStdString(it.title), QString::fromStdString(it.path)});
+        s.items.append({QString::fromStdString(it.title), QString::fromStdString(it.path),
+                        it.durationMs});
 
     std::lock_guard<std::mutex> lock(snapshotMutex_);
     snapshot_ = std::move(s);
@@ -1762,6 +1786,15 @@ void PlaylistDock::emitVendorItemStarted() {
     obs_data_set_string(d, "path", it->path.c_str());
     obs_data_set_int(d, "durationMs", it->durationMs);
     pld::emitVendorEvent("item-started", d);
+    obs_data_release(d);
+}
+
+void PlaylistDock::emitPlaylistChanged(const char* reason) {
+    obs_data_t* d = obs_data_create();
+    obs_data_set_string(d, "reason", reason);
+    obs_data_set_string(d, "playlistName", library_.active().name.c_str());
+    obs_data_set_int(d, "count", playlist_.size());
+    pld::emitVendorEvent("playlist-changed", d);
     obs_data_release(d);
 }
 
@@ -1907,6 +1940,7 @@ bool PlaylistDock::loadPlaylistFile(const QString& path) {
     existsCache_.clear();
     rebuildList();
     updateNowPlaying();
+    emitPlaylistChanged("loaded");
     startScan(toScan, /*replacesPlaylist=*/true);
     if (skipped > 0)
         setStatus(T("Status.SkippedItems").arg(static_cast<int>(skipped)), StatusKind::Warning);

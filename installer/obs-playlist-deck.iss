@@ -10,7 +10,7 @@
 ; earlier only look at the second. Portable OBS is not covered: use the zip.
 ;
 ; Built by CI (see the Windows job in .github/workflows/build_project.yml):
-;   ISCC /DAppVersion=1.3.4 /DPkgDir=<install tree> /O<output dir> obs-playlist-deck.iss
+;   ISCC /DAppVersion=1.4.0 /DPkgDir=<install tree> /O<output dir> obs-playlist-deck.iss
 
 #ifndef AppVersion
   #error Pass the plugin version: /DAppVersion=x.y.z

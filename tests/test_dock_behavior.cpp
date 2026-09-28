@@ -452,6 +452,62 @@ TEST_CASE("the vendor API stays backward compatible") {
     CHECK(dock.find("\"item-started\"") != std::string::npos);
     CHECK(dock.find("\"playback-state\"") != std::string::npos);
     CHECK(dock.find("\"playlist-completed\"") != std::string::npos);
+
+    // Issue #28. GetItems gained each item's duration without losing a field:
+    // a rundown needs the length of every item, not only the one on air.
+    const std::string items = bodyOf(main, "static void ws_get_items");
+    REQUIRE_FALSE(items.empty());
+    for (const char* field : {"\"index\"", "\"title\"", "\"path\"", "\"durationMs\""}) {
+        CAPTURE(field);
+        CHECK(items.find(std::string("(entry, ") + field) != std::string::npos);
+    }
+    const std::string status = bodyOf(main, "static void ws_get_status");
+    CHECK(status.find("\"totalDurationMs\"") != std::string::npos);
+    CHECK(status.find("\"unknownDurationCount\"") != std::string::npos);
+}
+
+// Issue #28. A client following the rundown re-reads GetItems when told to, so
+// every edit of the item list has to say so: skipping an item on air means
+// removing it, and a missed event is a rundown that no longer matches the show.
+TEST_CASE("every playlist edit emits playlist-changed") {
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    const std::string emit = bodyOf(dock, "void PlaylistDock::emitPlaylistChanged");
+    REQUIRE_FALSE(emit.empty());
+    CHECK(emit.find("\"playlist-changed\"") != std::string::npos);
+    for (const char* field : {"\"reason\"", "\"playlistName\"", "\"count\""}) {
+        CAPTURE(field);
+        CHECK(emit.find(field) != std::string::npos);
+    }
+
+    struct Site {
+        const char* signature;
+        const char* reason;
+    };
+    for (const Site& site : {
+             Site{"void PlaylistDock::addPaths", "\"added\""},
+             Site{"void PlaylistDock::removeRows", "\"removed\""},
+             Site{"void PlaylistDock::onRowsMoved", "\"moved\""},
+             Site{"void PlaylistDock::onUp", "\"moved\""},
+             Site{"void PlaylistDock::onDown", "\"moved\""},
+             Site{"void PlaylistDock::wsMove", "\"moved\""},
+             Site{"void PlaylistDock::onItemRenamed", "\"renamed\""},
+             Site{"void PlaylistDock::onClear", "\"cleared\""},
+             Site{"void PlaylistDock::activateLibraryEntry", "\"switched\""},
+             Site{"bool PlaylistDock::loadPlaylistFile", "\"loaded\""},
+             Site{"void PlaylistDock::onUndo", "\"undo\""},
+             Site{"void PlaylistDock::onRedo", "\"redo\""},
+             Site{"void PlaylistDock::onFindMoved", "\"healed\""},
+             Site{"void PlaylistDock::onScanResults", "\"durations-updated\""},
+             Site{"void PlaylistDock::captureDuration", "\"durations-updated\""},
+         }) {
+        CAPTURE(site.signature);
+        const std::string body = bodyOf(dock, site.signature);
+        REQUIRE_FALSE(body.empty());
+        CHECK(body.find(site.reason) != std::string::npos);
+    }
+    // Undo and redo emit from the shared helper, with the reason they pass.
+    CHECK(bodyOf(dock, "void PlaylistDock::applyHistoryState")
+              .find("emitPlaylistChanged(reason)") != std::string::npos);
 }
 
 // The mute belongs to the OBS source, shared with the audio mixer. The deck
