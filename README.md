@@ -404,12 +404,12 @@ Generated from [`obs-compat.json`](obs-compat.json) by `tools/obs_compat.py`.
 </details>
 <!-- obs-compat:end -->
 
-**OBS 33 is supported only partially, while it is in beta.** The plugin compiles
-and links against 33.0.0-beta5, and CI checks that the Linux package resolves
-every library and symbol it needs inside OBS's own 33 beta package for Ubuntu
-26.04. That is not the same as running a show on it: full compatibility will be
-tested again, and declared in the table above, when OBS 33 is released to the
-public.
+**OBS 33 is supported only partially, while it is in beta.** The newest OBS 33
+prerelease the plugin builds against is listed under "Also builds against" in the
+table above; CI checks that the Linux package resolves every library and symbol
+it needs inside OBS's own 33 beta package for Ubuntu 26.04. That is not the same
+as running a show on it: full compatibility will be tested again, and declared in
+that table, when OBS 33 is released to the public.
 
 ## Building from source
 
