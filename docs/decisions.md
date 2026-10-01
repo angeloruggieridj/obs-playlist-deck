@@ -262,3 +262,56 @@ deadlock, confirmed by dispatching the workflow before the fix (run
 Fixed by dropping `needs: tests` from `compat-discover` alone; `release`
 still needs both `tests` and `compat-report`, so a failing test suite still
 blocks a release.
+
+## 17. The scheduled watch records a green declaration itself (2026-10-01)
+
+Decision 16's daily watch was right about *what* to check and wrong about what
+to do with a clean result. `needs_full_run` wakes the whole matrix when OBS
+publishes anything — including a beta that never enters the declared range —
+and `--report` then compared the freshly derived manifest against the committed
+declaration and returned `EXIT_STALE` when they differed. Every OBS release
+therefore produced a red scheduled run a human had to clear by hand: download
+the manifest artifact, run `obs_compat.py --write`, commit. Run
+[36859140158](https://github.com/angeloruggieridj/obs-playlist-deck/actions/runs/36859140158)
+is the canonical instance, and it changed nothing about compatibility — only
+the measured beta (`33.0.0-beta4` → `beta5`).
+
+The tool already distinguished the two cases in words ("every probe is green"
+versus "the plugin does not build against X"), but not in exit codes. The
+distinction is now load-bearing:
+
+- A **genuine incompatibility** (`plugin-build` on a non-beta candidate) still
+  returns `EXIT_INCOMPATIBLE` and fails the run.
+- **Missing or unverifiable evidence** — skipped artifacts, an SDK that would
+  not build, a red beta — still returns `EXIT_STALE` and fails the run, because
+  compatibility could not actually be established.
+- **Every probe green, declaration merely behind** returns `EXIT_OK`. The run
+  stays green, and a new `compat-record` job on the scheduled workflow renders
+  the declaration from the manifest the matrix just produced, and commits it.
+
+This is a deliberate, narrow reversal of the "no auto-commit of the README from
+CI" non-goal in the 2026-08-31 design: the manual correction was the recurring
+cost, and a green run that still demanded a human is the failure mode the daily
+watch exists to avoid. The exception is scoped so it cannot over-reach:
+
+- only on `schedule`, and only when the matrix actually ran and the report is
+  green;
+- it commits only `obs-compat.json`, `README.md` and the workflow's
+  `OBS_VERSION` — the files the generator owns, rendered from evidence, never
+  hand-typed;
+- the push uses `GITHUB_TOKEN`, which triggers no further workflow run, so
+  there is no loop;
+- when `OBS_VERSION` moves (a new stable, not a beta) it dispatches a full run,
+  so the platform builds validate the new number before it is believed. That
+  dispatch is a `workflow_dispatch`, not the schedule, so the record job does
+  not run in it.
+
+The `--check` gate (level 1, on every push and pull request) is untouched: a
+release whose README, manifest and `OBS_VERSION` disagree is still blocked. A
+green-but-stale declaration never *over*-claims — all probes passed — so
+recording it automatically cannot promise more than CI measured.
+
+**Would be wrong if:** the commit ran without the matrix having run (it cannot —
+the artifact is the matrix's own output), or if a non-green result were recorded
+as compatible (it is not — `EXIT_INCOMPATIBLE` and `EXIT_STALE` still fail
+first), or if the auto-commit wrote a file the generator does not own.

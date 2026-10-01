@@ -47,8 +47,11 @@ plugin incompatibility. Nothing in the current setup distinguishes those two.
   so in those words.
 - No per-patch bisection. Granularity is the OBS minor.
 - No bot that opens issues. A failing scheduled run already sends mail.
-- No auto-commit of the README from CI. The manifest and README are edited by
-  a human (or an agent) running `--write`, and verified by `--check`.
+- ~~No auto-commit of the README from CI.~~ **Revised 2026-10-01:** the daily
+  watch now records a green declaration itself (`compat-record`); see
+  [decisions.md](../decisions.md) §17. Everywhere else the manifest and README
+  are edited by a human (or an agent) running `--write`, and verified by
+  `--check`.
 
 ## What "supported" means
 
@@ -222,7 +225,10 @@ and gets ignored:
   The message names the version and the phase, and points at the log.
 - **Stale declaration** — every probe is green but the manifest, README or
   `OBS_VERSION` names an older version than the world. The message says the
-  range moved and to run `python3 tools/obs_compat.py --write`, then commit.
+  range moved and points at `python3 tools/obs_compat.py --write`. On the
+  scheduled watch this is no longer a failure: `--report` returns success and
+  `compat-record` writes the declaration itself (see
+  [decisions.md](../decisions.md) §17). The message is a notice, not a red run.
 
 Distinct exit codes and distinct wording. The second is a reminder; the first
 is a problem.

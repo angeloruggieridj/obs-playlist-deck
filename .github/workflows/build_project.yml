@@ -713,6 +713,78 @@ jobs:
           path: obs-compat.json
           if-no-files-found: warn
 
+  # The daily watch exists to notice when OBS moves. When it does and every
+  # probe is still green, the declaration that lags the world has to be
+  # updated -- and making a human download the manifest artifact, run --write
+  # and commit turned every OBS release into a manual chore. Run 36859140158
+  # was exactly that: a beta-only move (33.0.0-beta4 -> beta5) that changed
+  # nothing about the declared range, yet failed a scheduled run.
+  #
+  # This job records the derived declaration automatically, so a green run
+  # stays green and only a genuine incompatibility -- or evidence that could
+  # not be gathered -- turns the pipeline red. It is a deliberate, narrow
+  # exception to the "no auto-commit from CI" non-goal (see docs/decisions.md),
+  # scoped to be safe: only on schedule, only when the matrix produced a fresh
+  # manifest and the report is green, and only files the generator owns. The
+  # push uses GITHUB_TOKEN, which triggers no further workflow run, so it
+  # cannot loop.
+  compat-record:
+    name: OBS compat — record
+    needs: [compat-discover, compat-report]
+    if: >-
+      github.event_name == 'schedule' &&
+      needs.compat-discover.outputs.run_full == 'true' &&
+      needs.compat-report.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      # contents: write pushes the declaration; actions: write lets the last
+      # step ask for a full run when OBS_VERSION itself moved.
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      # compat-report uploaded the manifest it derived, whether or not the
+      # committed declaration was stale. Rendering from that -- never from a
+      # hand-typed number -- is what keeps this job honest: it can only ever
+      # write what the probes actually proved.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: obs-compat-manifest
+      - name: Render the declaration from the manifest
+        run: python3 tools/obs_compat.py --write
+      - name: Commit and push when the declaration moved
+        id: commit
+        run: |
+          # Only README.md and the workflow carry a *declaration*. A run that
+          # merely refreshes the manifest's `generated` date changes neither,
+          # and committing that would add a no-op commit on every weekly run.
+          # The diff on those two files is therefore the signal; obs-compat.json
+          # rides along whenever they moved.
+          if git diff --quiet -- README.md .github/workflows/build_project.yml; then
+            echo "the declaration already matches the manifest; nothing to record"
+            exit 0
+          fi
+          if ! git diff --quiet -- .github/workflows/build_project.yml; then
+            echo "obs_version_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          version="$(python3 -c 'import json; m=json.load(open("obs-compat.json")); print(m["min_supported"] + " - " + m["max_tested"] + (" (beta " + m["beta_tested"] + ")" if m.get("beta_tested") else ""))')"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add obs-compat.json README.md .github/workflows/build_project.yml
+          git commit -m "docs(compat): record OBS ${version}"
+          git push
+      # A moved OBS_VERSION changes what the shipped binaries are compiled
+      # against, so the platform builds must run against it before the number
+      # is believed. The push above was made with GITHUB_TOKEN, which by design
+      # triggers no workflow, so ask for a run explicitly. That run is a
+      # workflow_dispatch, not the schedule, so this job does not run in it and
+      # there is no loop.
+      - name: Validate a moved OBS_VERSION with a full run
+        if: steps.commit.outputs.obs_version_changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build_project.yml --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}"
+
   # Stream Deck companion packaging: installable zip + Elgato .streamDeckPlugin,
   # published as public release assets.
   streamdeck:

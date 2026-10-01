@@ -525,6 +525,17 @@ def fetch_tags(token: str | None) -> list[str]:
 # Exit 1 means one thing and only one thing: the plugin does not compile
 # against a probed OBS version. Nothing else -- not a bad artifact, not a
 # missing argument, not an unexpected exception -- may ever produce it.
+#
+# Exit 2 is "stale" in two senses. For --check (the offline level-1 gate that
+# runs on every push and pull request) it is any README/manifest/OBS_VERSION
+# disagreement, and it must stay fatal: a release whose declaration CI cannot
+# stand behind has to be blocked. For --report (the level-2 gate that compares
+# the committed declaration against fresh evidence) it is now narrower: only
+# the degraded case where the evidence itself is missing or failed for a
+# non-plugin reason. A fully green run whose only "problem" is that the
+# committed declaration lagged the world returns EXIT_OK instead, so the
+# scheduled workflow can record the new declaration automatically rather than
+# waking a human for an OBS release that changed nothing about compatibility.
 EXIT_OK = 0
 EXIT_INCOMPATIBLE = 1
 EXIT_STALE = 2
@@ -614,9 +625,11 @@ def _discover() -> int:
 # The three steps in order, because "run --write" on its own sent operators
 # down a dead end: --write renders from the LOCAL obs-compat.json, which on
 # their machine is still the old one, so it is a no-op and their local
-# --check already passes. Nothing commits the manifest _report just wrote on
-# the runner -- it only lands in the uploaded artifact -- so step 1 has to
-# happen before --write does anything at all.
+# --check already passes. Nothing commits the manifest _report writes on the
+# runner -- it only lands in the uploaded artifact -- except the scheduled
+# `compat-record` job, whose whole job is to spare a human these three steps.
+# When it did not or could not run (a manual --report, or a degraded one that
+# failed first), step 1 still has to happen before --write does anything.
 UPDATE_INSTRUCTIONS = (
     "To update the compatibility declaration: (1) download this run's "
     "'obs-compat-manifest' artifact and save it as obs-compat.json at the "
@@ -679,41 +692,58 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None,
         return EXIT_INCOMPATIBLE
 
     problems = check(root)
-    for problem in problems:
-        print(f"::error::{problem}", file=sys.stderr)
-    if problems:
-        # Determine if any probe failed at obs-build (SDK build failure).
-        obs_build_failures = [version for version, result in results.items()
-                               if result.get("phase") == "obs-build"]
-        # A beta that failed is not "every probe is green" either -- its
-        # result is real evidence and its absence from the declared range is
-        # by design, but the message must not claim a clean sweep while
-        # holding a fail/plugin-build record for it.
-        beta_failed = beta is not None and results.get(beta, {}).get("status") != "ok"
-        if skipped or obs_build_failures or beta_failed:
-            # Do not claim every probe was green; some evidence is missing or
-            # failed for a reason other than the plugin. Name whichever of
-            # the three actually occurred rather than a fixed sentence that
-            # would point at a zero count or at ::warning:: lines that were
-            # never printed.
-            reasons = []
-            if skipped:
-                reasons.append(f"{len(skipped)} artifact(s) could not be read "
-                                f"(see ::warning:: messages above)")
-            if obs_build_failures:
-                reasons.append(f"the OBS SDK failed to build for "
-                                f"{', '.join(sorted(obs_build_failures))}")
-            if beta_failed:
-                reasons.append(f"the beta ({beta}) failed to build")
-            print(f"::notice::compatibility matrix check failed: {'; '.join(reasons)}. "
-                  f"The supported range may not have genuinely moved — inspect "
-                  f"--artifacts and re-run before updating the declaration. "
-                  f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
-        else:
-            # All probes succeeded and check found problems → range simply moved.
-            print(f"::notice::every probe is green — the declared range simply moved. "
-                  f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
+    if not problems:
+        return EXIT_OK
+
+    # The committed declaration (README / OBS_VERSION) disagrees with the
+    # manifest just derived from this run's evidence. Whether that is a failure
+    # depends on why it disagrees, so the two cases are separated below.
+    #
+    # Determine if any probe failed at obs-build (SDK build failure).
+    obs_build_failures = [version for version, result in results.items()
+                           if result.get("phase") == "obs-build"]
+    # A beta that failed is not "every probe is green" either -- its
+    # result is real evidence and its absence from the declared range is
+    # by design, but the message must not claim a clean sweep while
+    # holding a fail/plugin-build record for it.
+    beta_failed = beta is not None and results.get(beta, {}).get("status") != "ok"
+
+    if skipped or obs_build_failures or beta_failed:
+        # Evidence is missing or a probe failed for a reason other than the
+        # plugin: compatibility could not actually be verified, and that is a
+        # problem a human has to look at -- not a declaration to record
+        # blindly. Do not claim every probe was green; name whichever of the
+        # three actually occurred rather than a fixed sentence that would
+        # point at a zero count or at ::warning:: lines that were never
+        # printed. Keep failing the run.
+        for problem in problems:
+            print(f"::error::{problem}", file=sys.stderr)
+        reasons = []
+        if skipped:
+            reasons.append(f"{len(skipped)} artifact(s) could not be read "
+                            f"(see ::warning:: messages above)")
+        if obs_build_failures:
+            reasons.append(f"the OBS SDK failed to build for "
+                            f"{', '.join(sorted(obs_build_failures))}")
+        if beta_failed:
+            reasons.append(f"the beta ({beta}) failed to build")
+        print(f"::notice::compatibility matrix check failed: {'; '.join(reasons)}. "
+              f"The supported range may not have genuinely moved — inspect "
+              f"--artifacts and re-run before updating the declaration. "
+              f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
         return EXIT_STALE
+
+    # Every probe is green: the committed declaration merely lags the world.
+    # This is exactly what the daily watch exists to notice, and it is not a
+    # compatibility failure -- the scheduled workflow records the freshly
+    # derived declaration itself (the `compat-record` job), so a green run
+    # stays green and only a genuine incompatibility turns the pipeline red.
+    # Report the disagreement as warnings, not errors, and succeed.
+    for problem in problems:
+        print(f"::warning::{problem}", file=sys.stderr)
+    print(f"::notice::every probe is green — the declared range simply moved. "
+          f"The scheduled watch records this automatically; to do it by hand: "
+          f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
     return EXIT_OK
 
 

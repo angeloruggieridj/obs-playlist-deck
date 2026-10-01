@@ -944,10 +944,17 @@ class ReportMessageWhenDegraded(unittest.TestCase):
                 with mock.patch("sys.stderr", captured_stderr):
                     exit_code = obs_compat._report(artifact_dir, GRID, MAX_TESTED, None, root=root)
 
-            self.assertEqual(exit_code, obs_compat.EXIT_STALE)
+            # Green but stale is no longer a failure: the scheduled workflow
+            # records the new declaration itself, so the run stays green and a
+            # human is woken only by a real incompatibility. This test used to
+            # assert EXIT_STALE, which made every OBS release a red run needing
+            # a manual --write (see run 36859140158, a beta-only move).
+            self.assertEqual(exit_code, obs_compat.EXIT_OK)
             stderr = captured_stderr.getvalue()
-            # Should claim every probe is green
+            # Should still claim every probe is green...
             self.assertIn("every probe is green", stderr)
+            # ...as a notice, never as an error.
+            self.assertNotIn("::error::", stderr)
             # Should NOT mention artifacts that couldn't be read
             self.assertNotIn("artifact(s) could not be read", stderr)
 
