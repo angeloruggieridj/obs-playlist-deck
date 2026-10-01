@@ -7,6 +7,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **The scheduled watch records a green compatibility declaration itself.** The
+  daily and weekly runs already wake the OBS matrix when OBS publishes anything;
+  until now a green result still failed the run whenever the committed
+  declaration lagged it, so every OBS release needed a manual
+  `obs_compat.py --write`. A new `compat-record` job renders the declaration
+  from the manifest the matrix just produced and commits it, and dispatches a
+  full run when `OBS_VERSION` itself moves, so the platform builds validate the
+  new number before it is believed. A run now turns red only for a real
+  incompatibility, or for evidence that could not be gathered. This is a
+  deliberate, narrow exception to the previous "no auto-commit from CI" rule —
+  it is the only scheduled job that asks for `contents: write` — and is recorded
+  in [docs/decisions.md](docs/decisions.md) §17. The `--check` gate on every push
+  and pull request is unchanged.
+
 ## [1.4.0] — 2026-09-28
 
 Remote clients can now follow the whole playlist, not only the clip on air:

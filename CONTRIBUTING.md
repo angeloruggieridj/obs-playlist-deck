@@ -79,12 +79,17 @@ with the comment updated.
 `obs-compat.json`, the README's Compatibility table and `build_project.yml`'s
 `OBS_VERSION` are three statements about the same evidence, kept honest by
 `tools/obs_compat.py --check` in CI. The evidence itself — which OBS SDKs the
-plugin actually compiled against — only comes from the `compat-report` job in
-`build_project.yml`, which runs on a tag push, a manual dispatch, or the
-weekly schedule. Nothing in that job commits its result; it only uploads it.
+plugin actually compiled against — only comes from the compat matrix, and
+`compat-report` compares it against what is committed.
 
-When `compat-report` fails (or you want to pull in evidence it produced on a
-green run), update the declaration locally:
+On the scheduled watch (daily and weekly) this is now self-service: when OBS
+publishes anything and every probe is still green, the `compat-record` job
+renders the declaration from the manifest the matrix just produced and commits
+it. A green run stays green; only a real incompatibility, or evidence that could
+not be gathered, turns the run red.
+
+Update the declaration by hand when that job did not run or could not decide —
+a manual dispatch, a tag push, or a run that failed before recording:
 
 1. Open the failed (or latest) `compat-report` run on GitHub Actions and
    download its `obs-compat-manifest` artifact.

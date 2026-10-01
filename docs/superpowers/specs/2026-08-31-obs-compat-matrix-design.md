@@ -185,7 +185,10 @@ compat-discover      cheap; resolves grid, outputs matrix + run_full
   from the second run onward. No hand-written seed file.
 - `compat-report` runs `if: always()`, aggregates the artifacts, writes the
   table to the job step summary, and fails when a `required` candidate is not
-  green or when manifest/README/`OBS_VERSION` disagree with the evidence.
+  green or when the evidence itself is missing or unusable. When every probe is
+  green and only the committed declaration lags the world it succeeds, and the
+  scheduled `compat-record` job writes that declaration
+  (see [decisions.md](../decisions.md) §17).
 - `release` gains `needs: compat-report`. This is what makes "at every release"
   real: a tag whose README claims a range CI cannot stand behind is not
   published.
