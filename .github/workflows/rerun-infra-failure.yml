@@ -1,0 +1,54 @@
+name: Rerun infrastructure failures
+
+# A GitHub-hosted job can fail before it ever starts, because the pool has no
+# runner to hand it:
+#
+#   The job was not acquired by Runner of type hosted even after multiple attempts
+#
+# That is not our code, and it leaves a signature no real failure produces: the
+# unacquired job is `cancelled` with **zero steps**, while the run itself ends
+# `failure` (a run a human cancelled ends `cancelled` at the run level, so this
+# never reruns a deliberate stop). Jobs left `skipped` behind it -- everything
+# that had `needs:` on it -- are *not* failed, so only a full rerun restarts
+# them; `gh run rerun --failed` would restart nothing but the one cancelled job.
+#
+# The retry is bounded by run_attempt, so a genuinely broken pool cannot spin:
+# at most two automatic retries, then it stays red for a human.
+
+on:
+  workflow_run:
+    workflows: ["Build Plugin"]
+    types: [completed]
+
+# The only permission this needs: re-run the run that just failed. It writes no
+# code and touches no repository content.
+permissions:
+  actions: write
+
+jobs:
+  rerun:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Rerun when a job never got a runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          # Zero steps with a non-skipped conclusion is "this job's body never
+          # ran": either cancelled (runner never acquired) or failed before its
+          # first step. A job that actually ran has at least "Set up job".
+          unacquired="$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" \
+            --jq '[.jobs[]
+                    | select((.steps | length) == 0)
+                    | select(.conclusion == "cancelled" or .conclusion == "failure")]
+                  | length')"
+          if [ "$unacquired" -eq 0 ]; then
+            echo "no job was left unacquired; this was a real failure, not a rerun candidate"
+            exit 0
+          fi
+          echo "$unacquired job(s) never got a runner; rerunning the whole run"
+          gh run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY"

@@ -26,6 +26,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `contents: write` — and is recorded in
   [docs/decisions.md](docs/decisions.md) §17. The `--check` gate on every push
   and pull request is unchanged.
+- **A job that never got a runner no longer reddens `main` for good.** Two full
+  builds fired together on 2026-10-05 exhausted the hosted-runner pool and left
+  jobs `cancelled` with zero steps ("The job was not acquired by Runner of type
+  hosted"), skipping everything downstream for no code reason. `Build Plugin`
+  now serialises runs per ref, and a small `rerun-infra-failure` workflow
+  retries that exact signature, bounded to two attempts. It asks only for
+  `actions: write`; see [docs/decisions.md](docs/decisions.md) §18.
 
 ## [1.4.0] — 2026-09-28
 

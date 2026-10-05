@@ -15,6 +15,18 @@ on:
     # system dependencies rot on their own schedule.
     - cron: "0 7 * * 1"
 
+# One run per ref at a time. Two full runs fired together -- a push and a
+# dispatch eleven seconds apart, on 2026-10-05 -- ask for roughly thirty
+# hosted jobs at once and exhaust the pool, which comes back as jobs that are
+# cancelled with zero steps ("The job was not acquired by Runner of type
+# hosted even after multiple attempts"). Serialising them trades a little
+# wall-clock for never competing with ourselves. A run already in progress is
+# never cancelled here; only the newest *pending* run survives, and superseded
+# pull-request runs are cancelled outright, since their commit is already gone.
+concurrency:
+  group: build-plugin-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Least privilege by default: only the release job needs to write to the
 # repository, and it asks for that itself. A build job that is compromised (or
 # an action whose tag is repointed) otherwise inherits push access it never

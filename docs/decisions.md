@@ -319,3 +319,41 @@ recording it automatically cannot promise more than CI measured.
 the artifact is the matrix's own output), or if a non-green result were recorded
 as compatible (it is not — `EXIT_INCOMPATIBLE` and `EXIT_STALE` still fail
 first), or if the auto-commit wrote a file the generator does not own.
+
+## 18. CI retries a job that never got a runner, and refuses to race itself (2026-10-05)
+
+The push that deployed §17 and a manual dispatch fired eleven seconds apart.
+Together they asked for roughly thirty GitHub-hosted jobs at once; the pool
+could not seat them, and two runs died with `Unit tests` **cancelled and zero
+steps executed**, the run itself `failure`:
+
+> The job was not acquired by Runner of type hosted even after multiple attempts
+
+Nothing about the code was wrong — the same commit passed every job once the
+runs stopped overlapping — but a red `main` that no commit caused is exactly
+the noise §17 exists to remove, so it is worth removing here too. Prevention
+and recovery are different problems, so the response is two changes.
+
+- **Prevention.** `Build Plugin` declares a `concurrency` group keyed on the
+  ref. A runner pool does not hand out more capacity because two runs ask at
+  once; it splits what exists, badly. A run already in progress is never
+  cancelled — only the newest *pending* run survives, and superseded
+  pull-request runs are cancelled outright — so the daily watch is not lost to
+  a late push.
+- **Recovery.** A new `rerun-infra-failure` workflow watches `Build Plugin` for
+  completion and, when a job finished `cancelled` with zero steps while the run
+  ended `failure`, reruns the whole run, bounded by `run_attempt < 3`.
+
+That signature is what makes the retry safe. A job that actually ran has at
+least a "Set up job" step, so zero steps means the body never executed; and a
+run a human cancelled ends `cancelled` at the run level, never `failure`, so
+this cannot resurrect a deliberate stop. It re-runs the whole run rather than
+`--failed` jobs because the dependents of a job that never started are
+`skipped`, not failed, and a failed-jobs re-run would leave them skipped. The
+workflow asks for `actions: write` and nothing else: it writes no code and
+touches no repository content.
+
+**Would be wrong if:** GitHub changed how an unacquired job is recorded — then
+detection stops firing and the rerun simply does not happen — or if a genuine
+failure ever left a zero-step job behind, in which case a real failure would be
+retried up to twice. That is costly, not dangerous: it still ends red.
