@@ -282,29 +282,33 @@ distinction is now load-bearing:
 
 - A **genuine incompatibility** (`plugin-build` on a non-beta candidate) still
   returns `EXIT_INCOMPATIBLE` and fails the run.
-- **Missing or unverifiable evidence** — skipped artifacts, an SDK that would
-  not build, a red beta — still returns `EXIT_STALE` and fails the run, because
-  compatibility could not actually be established.
-- **Every probe green, declaration merely behind** returns `EXIT_OK`. The run
-  stays green, and a new `compat-record` job on the scheduled workflow renders
-  the declaration from the manifest the matrix just produced, and commits it.
+- **Missing or unverifiable evidence for a version the declared range covers**
+  — a skipped artifact, or an SDK that would not build — still returns
+  `EXIT_STALE` and fails the run, because compatibility could not be
+  established.
+- **Every probe the declared range depends on green, declaration merely
+  behind** returns `EXIT_OK`. The run stays green, and a new `compat-record`
+  job renders the declaration from the manifest the matrix just produced, and
+  commits it. A beta that fails to build — obs-build or plugin-build — is
+  recorded here too: a beta never enters the range and never gates, so its
+  failure must not be what reddens the daily watch.
 
 This is a deliberate, narrow reversal of the "no auto-commit of the README from
 CI" non-goal in the 2026-08-31 design: the manual correction was the recurring
 cost, and a green run that still demanded a human is the failure mode the daily
 watch exists to avoid. The exception is scoped so it cannot over-reach:
 
-- only on `schedule`, and only when the matrix actually ran and the report is
-  green;
+- only on the scheduled watch or a manual dispatch, and only when the matrix
+  actually ran and the report is green;
 - it commits only `obs-compat.json`, `README.md` and the workflow's
   `OBS_VERSION` — the files the generator owns, rendered from evidence, never
   hand-typed;
 - the push uses `GITHUB_TOKEN`, which triggers no further workflow run, so
   there is no loop;
 - when `OBS_VERSION` moves (a new stable, not a beta) it dispatches a full run,
-  so the platform builds validate the new number before it is believed. That
-  dispatch is a `workflow_dispatch`, not the schedule, so the record job does
-  not run in it.
+  so the platform builds validate the new number before it is believed. The
+  record job runs in that dispatch too, but the declaration already matches, so
+  it commits nothing and asks for nothing further — no loop.
 
 The `--check` gate (level 1, on every push and pull request) is untouched: a
 release whose README, manifest and `OBS_VERSION` disagree is still blocked. A

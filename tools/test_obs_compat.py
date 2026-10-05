@@ -1184,6 +1184,60 @@ class ReportExcludesTheBetaFromTheGate(unittest.TestCase):
             self.assertEqual(written["beta_tested"], self.BETA)
             self.assertIn(self.BETA, summary_file.read_text(encoding="utf-8"))
 
+    def test_a_beta_whose_sdk_will_not_build_is_recorded_and_not_fatal(self):
+        # Regression for run 37335035241. OBS 33.0.0-beta6 requires FFmpeg
+        # >= 8.0 while the native composer runner ships 6.1, so its SDK would
+        # not build (obs-build) although every version in the declared range
+        # still did. --report used to treat that beta failure as fatal
+        # (EXIT_STALE): compat-record was skipped, the manifest never
+        # recorded the new beta, needs_full_run fired again the next day and
+        # the daily watch failed again -- forever, for a pre-release that
+        # never enters the range. A beta never gates, so it is recorded and
+        # the run succeeds.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "build_project.yml").write_text(
+                f'env:\n  OBS_VERSION: "{MAX_TESTED}"\n', encoding="utf-8")
+            # A declaration that lags the world: empty between the markers is
+            # the crudest stale case, and enough to make check() disagree.
+            (root / "README.md").write_text(
+                f"## Compatibility\n\n{obs_compat.README_START}\n"
+                f"{obs_compat.README_END}\n\n## Building\n", encoding="utf-8")
+
+            artifact_dir = root / "compat-artifacts"
+            artifact_dir.mkdir()
+            for version in GRID + [MAX_TESTED]:
+                folder = artifact_dir / f"compat-{version}"
+                folder.mkdir()
+                (folder / f"compat-{version}.json").write_text(
+                    json.dumps({"obs": version, **ok()}), encoding="utf-8")
+            beta_folder = artifact_dir / f"compat-{self.BETA}"
+            beta_folder.mkdir()
+            (beta_folder / f"compat-{self.BETA}.json").write_text(
+                json.dumps({"obs": self.BETA, **unbuildable("native")}),
+                encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+                import io
+                stderr = io.StringIO()
+                with mock.patch("sys.stderr", stderr):
+                    exit_code = obs_compat._report(
+                        artifact_dir, GRID, MAX_TESTED, self.BETA, root=root)
+
+            # A beta never gates: the run succeeds...
+            self.assertEqual(exit_code, obs_compat.EXIT_OK)
+            stderr_text = stderr.getvalue()
+            # ...as a notice, never an error...
+            self.assertNotIn("::error::", stderr_text)
+            self.assertIn("did not build", stderr_text)
+            # ...and the failure is still recorded, so needs_full_run stops
+            # re-firing on this beta the next day.
+            written = obs_compat.load_manifest(root / "obs-compat.json")
+            self.assertEqual(written["results"][self.BETA]["phase"], "obs-build")
+            self.assertEqual(written["beta_tested"], self.BETA)
+
     def test_the_readme_does_not_advertise_a_red_beta(self):
         # The other half of CRITICAL 1: even when the README genuinely needs
         # rewriting for an unrelated reason (here: it is empty between the

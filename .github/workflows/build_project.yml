@@ -721,18 +721,20 @@ jobs:
   # nothing about the declared range, yet failed a scheduled run.
   #
   # This job records the derived declaration automatically, so a green run
-  # stays green and only a genuine incompatibility -- or evidence that could
-  # not be gathered -- turns the pipeline red. It is a deliberate, narrow
-  # exception to the "no auto-commit from CI" non-goal (see docs/decisions.md),
-  # scoped to be safe: only on schedule, only when the matrix produced a fresh
-  # manifest and the report is green, and only files the generator owns. The
-  # push uses GITHUB_TOKEN, which triggers no further workflow run, so it
-  # cannot loop.
+  # stays green and only a genuine incompatibility -- or evidence for a
+  # version the declared range covers that could not be gathered -- turns the
+  # pipeline red. A beta's failure never gates, so it is recorded here rather
+  # than re-firing the matrix every day. It is a deliberate, narrow exception
+  # to the "no auto-commit from CI" non-goal (see docs/decisions.md), scoped to
+  # be safe: only on the scheduled watch or a manual dispatch, only when the
+  # matrix produced a fresh manifest and the report is green, and only files
+  # the generator owns. The push uses GITHUB_TOKEN, which triggers no further
+  # workflow run, so it cannot loop.
   compat-record:
     name: OBS compat — record
     needs: [compat-discover, compat-report]
     if: >-
-      github.event_name == 'schedule' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
       needs.compat-discover.outputs.run_full == 'true' &&
       needs.compat-report.result == 'success'
     runs-on: ubuntu-24.04

@@ -82,11 +82,13 @@ with the comment updated.
 plugin actually compiled against — only comes from the compat matrix, and
 `compat-report` compares it against what is committed.
 
-On the scheduled watch (daily and weekly) this is now self-service: when OBS
-publishes anything and every probe is still green, the `compat-record` job
-renders the declaration from the manifest the matrix just produced and commits
-it. A green run stays green; only a real incompatibility, or evidence that could
-not be gathered, turns the run red.
+On the scheduled watch (daily and weekly), and on a manual dispatch, this is
+now self-service: when OBS publishes anything and every probe the declared
+range depends on is still green, the `compat-record` job renders the
+declaration from the manifest the matrix just produced and commits it. A green
+run stays green; only a real incompatibility, or evidence about a version the
+declared range covers that could not be gathered, turns the run red. A beta's
+own failure is recorded, not fatal — a beta never enters the declared range.
 
 Update the declaration by hand when that job did not run or could not decide —
 a manual dispatch, a tag push, or a run that failed before recording:

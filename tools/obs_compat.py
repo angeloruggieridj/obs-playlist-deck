@@ -531,11 +531,13 @@ def fetch_tags(token: str | None) -> list[str]:
 # disagreement, and it must stay fatal: a release whose declaration CI cannot
 # stand behind has to be blocked. For --report (the level-2 gate that compares
 # the committed declaration against fresh evidence) it is now narrower: only
-# the degraded case where the evidence itself is missing or failed for a
-# non-plugin reason. A fully green run whose only "problem" is that the
-# committed declaration lagged the world returns EXIT_OK instead, so the
-# scheduled workflow can record the new declaration automatically rather than
-# waking a human for an OBS release that changed nothing about compatibility.
+# when evidence for a version the declared range covers is missing -- an
+# artifact that could not be read, or an SDK that would not build. A run whose
+# only "problem" is that the committed declaration lagged the world returns
+# EXIT_OK instead, so the scheduled workflow can record the new declaration
+# automatically rather than waking a human for an OBS release that changed
+# nothing about compatibility. A beta is never such evidence: it never enters
+# the declared range, so neither its failure nor its absence ever earns exit 2.
 EXIT_OK = 0
 EXIT_INCOMPATIBLE = 1
 EXIT_STALE = 2
@@ -702,48 +704,61 @@ def _report(artifact_dir: Path, grid: list[str], latest: str, beta: str | None,
     # Determine if any probe failed at obs-build (SDK build failure).
     obs_build_failures = [version for version, result in results.items()
                            if result.get("phase") == "obs-build"]
-    # A beta that failed is not "every probe is green" either -- its
-    # result is real evidence and its absence from the declared range is
-    # by design, but the message must not claim a clean sweep while
-    # holding a fail/plugin-build record for it.
+    # An SDK that will not build says nothing about the plugin, but for a
+    # version the declared range actually covers it is still evidence CI could
+    # not gather, and that is a problem a human has to look at. A beta is
+    # different: it never enters the range and never gates (see
+    # ReportExcludesTheBetaFromTheGate), so its failure -- obs-build or
+    # plugin-build -- is recorded in the manifest and the table, and must not
+    # fail the run. OBS 33.0.0-beta6 needs FFmpeg >= 8.0 while the native
+    # runner ships 6.1, so its SDK would not build; treating that as fatal is
+    # what made the daily watch fail again every day (run 37335035241) after
+    # the green-but-stale case had already been fixed.
+    fatal_obs_build = [version for version in obs_build_failures if version != beta]
     beta_failed = beta is not None and results.get(beta, {}).get("status") != "ok"
 
-    if skipped or obs_build_failures or beta_failed:
-        # Evidence is missing or a probe failed for a reason other than the
-        # plugin: compatibility could not actually be verified, and that is a
-        # problem a human has to look at -- not a declaration to record
-        # blindly. Do not claim every probe was green; name whichever of the
-        # three actually occurred rather than a fixed sentence that would
-        # point at a zero count or at ::warning:: lines that were never
-        # printed. Keep failing the run.
+    if skipped or fatal_obs_build:
+        # Evidence is missing for a version CI is supposed to stand behind.
+        # Do not claim every probe was green; name what actually happened
+        # rather than a fixed sentence that would point at a zero count or at
+        # ::warning:: lines that were never printed. Keep failing the run.
         for problem in problems:
             print(f"::error::{problem}", file=sys.stderr)
         reasons = []
         if skipped:
             reasons.append(f"{len(skipped)} artifact(s) could not be read "
                             f"(see ::warning:: messages above)")
-        if obs_build_failures:
+        if fatal_obs_build:
             reasons.append(f"the OBS SDK failed to build for "
-                            f"{', '.join(sorted(obs_build_failures))}")
-        if beta_failed:
-            reasons.append(f"the beta ({beta}) failed to build")
+                            f"{', '.join(sorted(fatal_obs_build))}")
         print(f"::notice::compatibility matrix check failed: {'; '.join(reasons)}. "
               f"The supported range may not have genuinely moved — inspect "
               f"--artifacts and re-run before updating the declaration. "
               f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
         return EXIT_STALE
 
-    # Every probe is green: the committed declaration merely lags the world.
-    # This is exactly what the daily watch exists to notice, and it is not a
-    # compatibility failure -- the scheduled workflow records the freshly
-    # derived declaration itself (the `compat-record` job), so a green run
-    # stays green and only a genuine incompatibility turns the pipeline red.
-    # Report the disagreement as warnings, not errors, and succeed.
+    # Everything the declared range depends on is green: the committed
+    # declaration merely lags the world. That is exactly what the daily watch
+    # exists to notice, and it is not a compatibility failure -- the scheduled
+    # workflow records the freshly derived declaration itself (the
+    # `compat-record` job), so a green run stays green and only a genuine
+    # incompatibility turns the pipeline red. Report the disagreement as
+    # warnings, not errors, and succeed.
     for problem in problems:
         print(f"::warning::{problem}", file=sys.stderr)
-    print(f"::notice::every probe is green — the declared range simply moved. "
-          f"The scheduled watch records this automatically; to do it by hand: "
-          f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
+    if beta_failed:
+        # Deliberately not "every probe is green": the beta is real evidence
+        # too, and the message must not claim a clean sweep while holding a
+        # failure for it. It is recorded, its row says what happened, and it
+        # never gates -- but the run succeeds.
+        print(f"::notice::every probe the declared range depends on is green; "
+              f"the beta ({beta}) did not build and is recorded as such. "
+              f"The scheduled watch records the new declaration automatically.",
+              file=sys.stderr)
+    else:
+        print(f"::notice::every probe is green — the declared range simply moved. "
+              f"The scheduled watch records this automatically; to do it by hand: "
+              f"{UPDATE_INSTRUCTIONS}", file=sys.stderr)
     return EXIT_OK
 
 

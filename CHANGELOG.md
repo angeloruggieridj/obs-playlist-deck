@@ -16,11 +16,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `obs_compat.py --write`. A new `compat-record` job renders the declaration
   from the manifest the matrix just produced and commits it, and dispatches a
   full run when `OBS_VERSION` itself moves, so the platform builds validate the
-  new number before it is believed. A run now turns red only for a real
-  incompatibility, or for evidence that could not be gathered. This is a
-  deliberate, narrow exception to the previous "no auto-commit from CI" rule —
-  it is the only scheduled job that asks for `contents: write` — and is recorded
-  in [docs/decisions.md](docs/decisions.md) §17. The `--check` gate on every push
+  new number before it is believed. It runs on the scheduled watch and on a
+  manual dispatch. A run now turns red only for a real incompatibility, or for
+  evidence about a version the declared range covers that could not be
+  gathered; a beta whose SDK will not build — OBS 33.0.0-beta6 needs FFmpeg
+  >= 8.0 — is recorded, not treated as a failure, because a beta never enters
+  the declared range. This is a deliberate, narrow exception to the previous
+  "no auto-commit from CI" rule — it is the only scheduled job that asks for
+  `contents: write` — and is recorded in
+  [docs/decisions.md](docs/decisions.md) §17. The `--check` gate on every push
   and pull request is unchanged.
 
 ## [1.4.0] — 2026-09-28

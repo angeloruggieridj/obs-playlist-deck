@@ -226,12 +226,14 @@ and gets ignored:
 
 - **Incompatibility** — a `required` candidate failed at `plugin-build`.
   The message names the version and the phase, and points at the log.
-- **Stale declaration** — every probe is green but the manifest, README or
+- **Stale declaration** — every probe the declared range depends on is green
+  (a beta's own failure does not count) but the manifest, README or
   `OBS_VERSION` names an older version than the world. The message says the
   range moved and points at `python3 tools/obs_compat.py --write`. On the
-  scheduled watch this is no longer a failure: `--report` returns success and
-  `compat-record` writes the declaration itself (see
-  [decisions.md](../decisions.md) §17). The message is a notice, not a red run.
+  scheduled watch and on a manual dispatch this is no longer a failure:
+  `--report` returns success and `compat-record` writes the declaration itself
+  (see [decisions.md](../decisions.md) §17). The message is a notice, not a red
+  run.
 
 Distinct exit codes and distinct wording. The second is a reminder; the first
 is a problem.
