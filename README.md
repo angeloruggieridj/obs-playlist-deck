@@ -380,6 +380,7 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 | **OBS Studio** | **30.0 – 32.2.2** |
 | **Verified by** | Compile and link against each version's OBS SDK in CI — not a runtime test. |
 | **Built against** | 32.2.2 |
+| **Also builds against** | 33.0.0-beta6 (prerelease, not supported) |
 | **Platforms** | Windows x64, Linux x86_64 (Ubuntu 24.04 and 26.04), macOS universal (Intel + Apple Silicon) |
 | **Qt** | Qt 6 — on Windows and macOS, the exact Qt the targeted OBS ships |
 
@@ -397,7 +398,7 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 | `32.1.0` | ✅ compiles and links | Ubuntu 24.04 |
 | `32.2.0` | ✅ compiles and links | Ubuntu 24.04 |
 | `32.2.2` | ✅ compiles and links | Ubuntu 24.04 |
-| `33.0.0-beta6` | ⚠️ SDK could not be built in CI | Ubuntu 24.04 |
+| `33.0.0-beta6` | ✅ compiles and links | Ubuntu 26.04 (container) |
 
 Generated from [`obs-compat.json`](obs-compat.json) by `tools/obs_compat.py`.
 </details>

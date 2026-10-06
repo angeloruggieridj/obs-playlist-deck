@@ -5,7 +5,7 @@
     "version": "30.0"
   },
   "gaps": [],
-  "generated": "2026-10-05",
+  "generated": "2026-10-06",
   "max_tested": "32.2.2",
   "min_supported": "30.0",
   "results": {
@@ -55,9 +55,9 @@
       "status": "ok"
     },
     "33.0.0-beta6": {
-      "env": "native",
-      "phase": "obs-build",
-      "status": "fail"
+      "env": "resolute",
+      "phase": null,
+      "status": "ok"
     }
   },
   "unverifiable": []
