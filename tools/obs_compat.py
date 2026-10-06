@@ -256,6 +256,7 @@ _OBS_VERSION = re.compile(r'^(\s*OBS_VERSION:\s*")([^"]*)(")', re.MULTILINE)
 ENV_LABELS = {
     "native": "Ubuntu 24.04",
     "jammy": "Ubuntu 22.04 (container)",
+    "resolute": "Ubuntu 26.04 (container)",
 }
 
 
@@ -436,11 +437,19 @@ def check(root: Path = ROOT) -> list[str]:
     return problems
 
 
-# Below this, the runner's FFmpeg 7 cannot build OBS, so the probe moves into an
+# Below this, the runner's FFmpeg cannot build OBS, so the probe moves into an
 # ubuntu:22.04 container (FFmpeg 4.4). Lower this to FLOOR to disable the
 # container path entirely — the older probes then report obs-build failures,
 # which the range logic already treats as unverifiable rather than unsupported.
 LEGACY_BOUNDARY = (31, 0)
+
+# OBS 33's FindFFmpeg.cmake requires FFmpeg >= 8.0, which neither jammy (4.4)
+# nor the native ubuntu-24.04 runner (6.1) ships; Ubuntu 26.04 LTS carries
+# 8.0.1, so versions from here up are probed in that container instead. Without
+# it the 33 probes fail at obs-build and the plugin is never actually tested
+# against the version users move to next — an absence of evidence the README
+# would then have to report as "SDK could not be built in CI".
+FFMPEG8_BOUNDARY = (33, 0)
 
 WEEKLY_CRON = "0 7 * * 1"
 TAGS_URL = "https://api.github.com/repos/obsproject/obs-studio/tags?per_page=100"
@@ -448,7 +457,11 @@ TAGS_URL = "https://api.github.com/repos/obsproject/obs-studio/tags?per_page=100
 
 def env_for(candidate: str) -> str:
     version = parse_version(candidate)
-    return "jammy" if (version[0], version[1]) < LEGACY_BOUNDARY else "native"
+    if (version[0], version[1]) < LEGACY_BOUNDARY:
+        return "jammy"
+    if (version[0], version[1]) < FFMPEG8_BOUNDARY:
+        return "native"
+    return "resolute"
 
 
 def build_matrix(grid: list[str], latest_stable: str, beta: str | None,
@@ -620,6 +633,7 @@ def _discover() -> int:
     _emit_output("beta", beta or "")
     _emit_output("native", json.dumps([e for e in matrix if e["env"] == "native"]))
     _emit_output("jammy", json.dumps([e for e in matrix if e["env"] == "jammy"]))
+    _emit_output("resolute", json.dumps([e for e in matrix if e["env"] == "resolute"]))
     print(f"grid={grid} latest={latest} beta={beta} run_full={full}", file=sys.stderr)
     return EXIT_OK
 

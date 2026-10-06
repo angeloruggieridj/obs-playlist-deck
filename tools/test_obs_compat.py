@@ -508,12 +508,19 @@ class WriteThenCheck(unittest.TestCase):
 
 class Environment(unittest.TestCase):
     def test_pre_31_probes_run_in_the_jammy_container(self):
-        # ubuntu-24.04 ships FFmpeg 7, which OBS 30-era code will not build against.
+        # The native runner's FFmpeg cannot build OBS 30-era code.
         self.assertEqual(obs_compat.env_for("30.2.0"), "jammy")
 
-    def test_31_and_later_run_on_the_native_runner(self):
+    def test_31_through_32_run_on_the_native_runner(self):
         self.assertEqual(obs_compat.env_for("31.0.0"), "native")
         self.assertEqual(obs_compat.env_for("32.2.2"), "native")
+
+    def test_33_and_later_run_in_the_resolute_container(self):
+        # OBS 33's FindFFmpeg.cmake requires FFmpeg >= 8.0. Only Ubuntu 26.04
+        # ("resolute") ships it, so the probe cannot stay on the native
+        # ubuntu-24.04 runner (FFmpeg 6.1) or in jammy (4.4).
+        self.assertEqual(obs_compat.env_for("33.0.0"), "resolute")
+        self.assertEqual(obs_compat.env_for("33.0.0-beta6"), "resolute")
 
 
 class BuildMatrix(unittest.TestCase):

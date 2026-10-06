@@ -357,3 +357,36 @@ touches no repository content.
 detection stops firing and the rerun simply does not happen — or if a genuine
 failure ever left a zero-step job behind, in which case a real failure would be
 retried up to twice. That is costly, not dangerous: it still ends red.
+
+## 19. OBS 33 is probed in an ubuntu:26.04 container, because it needs FFmpeg 8 (2026-10-06)
+
+OBS 33.0.0-beta6 tightened its `FindFFmpeg.cmake` to require FFmpeg >= 8.0. The
+native runner is ubuntu-24.04, which ships 6.1, and jammy ships 4.4, so the
+probe could no longer build the 33 SDK at all:
+
+```
+Could NOT find FFmpeg: Found unsuitable version "6.1", but required is at least "8.0"
+```
+
+That is an obs-build failure: recorded as unverifiable, never as
+incompatibility — correct, but it left the plugin **never actually compiled
+against OBS 33**, which is the one thing the matrix exists to find out. Up to
+beta5 it had built, so the README could say "also builds against 33.0.0-beta5";
+from beta6 it could only say "SDK could not be built in CI" — honest, and
+useless to anyone about to move to OBS 33.
+
+Ubuntu 26.04 LTS ("resolute") ships FFmpeg 8.0.1, so versions from `33.0` up are
+now probed in an `ubuntu:26.04` container (`resolute`), exactly as pre-31
+versions are probed in jammy. The native runner keeps 31–32, where FFmpeg 6.1 is
+enough; the boundary is `FFMPEG8_BOUNDARY = (33, 0)`. The container image is the
+same one the Linux release job already builds in, so it is not a new dependency
+to keep alive.
+
+The `compat-modern` job is `continue-on-error` until a probe proves it, like
+every other non-required candidate, so a first failure in the unfamiliar
+container cannot redden the run or block anything: it records an obs-build
+result until it earns the right to answer, and then it starts answering.
+
+**Would be wrong if:** OBS moved its FFmpeg requirement again, or a base image
+stopped shipping FFmpeg 8. Either would resurface as the same obs-build failure
+that prompted this, and the boundary would move with it.

@@ -599,6 +599,7 @@ jobs:
       run_full: ${{ steps.discover.outputs.run_full }}
       native: ${{ steps.discover.outputs.native }}
       jammy: ${{ steps.discover.outputs.jammy }}
+      resolute: ${{ steps.discover.outputs.resolute }}
       grid: ${{ steps.discover.outputs.grid }}
       latest_stable: ${{ steps.discover.outputs.latest_stable }}
       beta: ${{ steps.discover.outputs.beta }}
@@ -687,9 +688,54 @@ jobs:
           obs-version: ${{ matrix.obs }}
           env-name: jammy
 
+  # OBS 33's FindFFmpeg.cmake requires FFmpeg >= 8.0, which neither the native
+  # ubuntu-24.04 runner (6.1) nor jammy (4.4) ships; Ubuntu 26.04 LTS carries
+  # 8.0.1, so versions from 33.0 up are built in that container. Without it the
+  # 33 probes fail at obs-build and the plugin is never actually tested against
+  # the version most users move to next -- the README then has to report an
+  # absence of evidence rather than a result. See docs/decisions.md §19.
+  compat-modern:
+    name: OBS compat ${{ matrix.obs }} (26.04)
+    needs: compat-discover
+    if: >-
+      needs.compat-discover.outputs.run_full == 'true' &&
+      needs.compat-discover.outputs.resolute != '[]'
+    runs-on: ubuntu-24.04
+    container: ubuntu:26.04
+    continue-on-error: ${{ !matrix.required }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.compat-discover.outputs.resolute) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install build deps
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git cmake ninja-build pkg-config extra-cmake-modules g++ \
+            qt6-base-dev qt6-base-private-dev qt6-svg-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev \
+            libavfilter-dev libswscale-dev libswresample-dev libx264-dev \
+            libcurl4-openssl-dev libjansson-dev libmbedtls-dev libsimde-dev \
+            uthash-dev nlohmann-json3-dev zlib1g-dev libpng-dev \
+            libpipewire-0.3-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shm0-dev \
+            libxcb-xfixes0-dev libxcb-composite0-dev libxcb-xinput-dev \
+            libxfixes-dev libxcomposite-dev libxinerama-dev libxss-dev \
+            libdrm-dev libva-dev libxcb-cursor-dev \
+            libqrcodegencpp-dev librist-dev libsrt-openssl-dev \
+            libfontconfig1-dev libfreetype-dev \
+            libpci-dev libpulse-dev libudev-dev libasound2-dev
+      - uses: ./.github/actions/obs-compat-probe
+        with:
+          obs-version: ${{ matrix.obs }}
+          env-name: resolute
+
   compat-report:
     name: OBS compat — report
-    needs: [compat-discover, compat, compat-legacy]
+    needs: [compat-discover, compat, compat-legacy, compat-modern]
     if: always() && needs.compat-discover.outputs.run_full == 'true'
     runs-on: ubuntu-24.04
     steps:

@@ -33,6 +33,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   now serialises runs per ref, and a small `rerun-infra-failure` workflow
   retries that exact signature, bounded to two attempts. It asks only for
   `actions: write`; see [docs/decisions.md](docs/decisions.md) §18.
+- **OBS 33 is probed against FFmpeg 8.** OBS 33.0.0-beta6 requires FFmpeg
+  >= 8.0, which neither the native ubuntu-24.04 runner (6.1) nor jammy (4.4)
+  ships, so the 33 probes could not build the SDK and the plugin went untested
+  against it — the README could only say "SDK could not be built in CI".
+  Versions from 33.0 up are now built in an `ubuntu:26.04` container, which
+  carries FFmpeg 8.0.1, the same boundary treatment pre-31 versions already get
+  in jammy. This is what actually answers whether the plugin compiles against
+  OBS 33; see [docs/decisions.md](docs/decisions.md) §19.
 
 ## [1.4.0] — 2026-09-28
 

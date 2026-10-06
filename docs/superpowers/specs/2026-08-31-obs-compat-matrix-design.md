@@ -117,22 +117,27 @@ unverifiable minor below the declared minimum is listed in the README note as
 
 ## Build environments
 
+> **Revised 2026-10-06.** A third environment was added for OBS 33; see
+> [decisions.md](../decisions.md) §19.
+
 | candidate | environment | why |
 |---|---|---|
-| minor `< 31.0` | `container: ubuntu:22.04` | FFmpeg 4.4; OBS 30-era code does not build against the runner's FFmpeg 7 |
-| minor `>= 31.0` | `ubuntu-24.04` runner | matches the release build jobs |
+| minor `< 31.0` | `container: ubuntu:22.04` | FFmpeg 4.4; OBS 30-era code does not build against the runner's newer FFmpeg |
+| minor `31.0 – 32.x` | `ubuntu-24.04` runner | matches the release build jobs; FFmpeg 6.1 is enough here |
+| minor `>= 33.0` | `container: ubuntu:26.04` | FFmpeg 8.0.1; OBS 33's `FindFFmpeg.cmake` requires >= 8.0, which neither of the above ships |
 
 The mapping is explicit in the discovery script with that reasoning beside it,
 not an implicit rule derived from version numbers at three call sites.
 
-Implemented as **two jobs** — `compat` (native) and `compat-legacy`
-(container) — sharing a composite action at
+Implemented as **three jobs** — `compat` (native), `compat-legacy` (jammy) and
+`compat-modern` (resolute) — sharing a composite action at
 `.github/actions/obs-compat-probe/action.yml` (inputs: `obs-version`; produces
 the result artifact). The single-job alternative, `container` set from a matrix
 value with an empty string meaning "no container", relies on a subtle
-expression behaviour; the duplication of one job block is the cheaper risk.
+expression behaviour; the duplication of one job block per environment is the
+cheaper risk.
 
-Cache key: `obsdev-linux-<version>-<native|jammy>-v2`. The `v2` bump is
+Cache key: `obsdev-linux-<version>-<native|jammy|resolute>-v2`. The `v2` bump is
 mandatory — the existing `v1` keys hold native-only builds and must not be
 served to container jobs.
 
