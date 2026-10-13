@@ -140,3 +140,45 @@ TEST_CASE("totals ignore unknown durations but count them") {
     CHECK(p.totalDurationMs() == 90000);
     CHECK(p.unknownDurationCount() == 1);
 }
+
+// ---- Where playback resumes after the playing item is removed -------------
+
+namespace {
+Playlist numbered(int count) {
+    Playlist p;
+    for (int i = 0; i < count; ++i)
+        p.add(PlaylistItem{"/m/" + std::to_string(i) + ".mp4", "c" + std::to_string(i), -1});
+    return p;
+}
+} // namespace
+
+TEST_CASE("removing the playing item remembers the slot it left") {
+    Playlist p = numbered(4);
+    p.setCurrent(2);
+    p.removeAt(2);
+    CHECK(p.currentIndex() == -1);
+    CHECK(p.resumeIndex() == 2);
+}
+
+TEST_CASE("the resume slot follows removals above it") {
+    Playlist p = numbered(5);
+    p.setCurrent(3);
+    p.removeMany({1, 3}); // an item above, and the playing one
+    CHECK(p.currentIndex() == -1);
+    CHECK(p.resumeIndex() == 2); // what was row 4 is now row 2
+}
+
+TEST_CASE("choosing a current item, or reordering, drops the resume slot") {
+    Playlist p = numbered(4);
+    p.setCurrent(1);
+    p.removeAt(1);
+    REQUIRE(p.resumeIndex() == 1);
+    p.setCurrent(0);
+    CHECK(p.resumeIndex() == -1);
+
+    p.setCurrent(2);
+    p.removeAt(2);
+    REQUIRE(p.resumeIndex() == 2);
+    p.move(0, 1);
+    CHECK(p.resumeIndex() == -1);
+}

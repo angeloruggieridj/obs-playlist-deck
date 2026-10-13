@@ -7,7 +7,75 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-10-13
+
+The deck now plays strictly in list order, a long title no longer decides how
+narrow the dock can be, and an item can hand the show to a scene when it ends.
+The compatibility is unchanged: **OBS 30.0 – 32.2.2**, with OBS 33 supported
+partially while it is in beta.
+
+### Added
+
+- **Switch scene when an item ends** (Settings → Scenes). Off by default. When
+  an item that is on air finishes, the deck goes to a scene you choose with the
+  effect you choose: **Cut**, **Fade** or **Stinger**. The effect is the OBS
+  transition of that kind — Stinger uses the first Stinger transition set up in
+  OBS — and the transition OBS had selected is put back once the switch is over,
+  so your own choice is not left changed. It acts only on a real end of an item
+  whose source is in the program scene, does nothing if the target scene is
+  already on air, and in studio mode sends the scene through preview and
+  triggers the transition. A missing scene or transition is reported in the
+  status line instead of failing silently.
+
+### Fixed
+
+- **"Next" was not always the item that follows.** The cases that could send the
+  deck somewhere else are isolated and closed:
+  - With *Load next (paused)*, the queued clip was remembered as a row number.
+    Moving, inserting or removing an item above it shifted that number onto a
+    different clip, so the deck loaded an item other than the one shown after
+    "then:". The queued clip is now followed by what it is, not by where it was,
+    and dropped if it is gone.
+  - Moving an item with the Up/Down buttons never told the playback engine, so
+    the shuffle bag and a queued clip kept the old order. It also recorded the
+    undo step *after* the move, so Undo restored the already-moved list and
+    appeared to do nothing.
+  - Removing the item that was playing cleared the current position, so the next
+    Next, previous or end-of-item went to the top of the list. The slot is now
+    remembered: Next is the item that followed the removed one, Previous the one
+    before it, and "then:" says so.
+  - Stopping a removed item makes the source report an end. With nothing current,
+    the end handler started the list from item 1; an end with nothing current is
+    now ignored.
+  - *Panic*, and a source being released on a scene collection change, now
+    actually cancel a queued clip. Both claimed to, but only discarded it when
+    its row happened to be out of range, so it could load minutes later.
+- **A long item title set the minimum width of the dock.** The title in the
+  now-playing card, the "then:" line, the loaded-playlist line, the playlist and
+  source pickers and every list row reported the width of their full text as
+  their minimum, so the panel could not be dragged narrower than the longest
+  title it had shown and the surplus appeared as a wide empty strip beside the
+  list. They now shorten with an ellipsis as the dock narrows — the duration of
+  each row and of the playing item always stays visible, and a shortened line
+  carries its full text in a tooltip.
+- **The status line made the whole dock jump.** It was a wrapping label that was
+  empty, then one or two lines tall, then empty again, so every message that
+  appeared or faded pushed the card and the list down and back up. It now keeps
+  one line of its own for good; a longer message is shortened, with the full
+  text in the tooltip.
+
 ### Changed
+
+- **The panic scene is picked from a list, not typed.** The Settings field is a
+  drop-down of the scenes OBS has right now, read again every time it is opened,
+  so a scene added or renamed while the window is open shows up. A saved scene
+  that is not in the current scene collection stays selected and is marked as
+  missing — opening Settings never erases a choice.
+- **The Settings window is redesigned to survive being resized.** Options sit
+  under headings (Playback, Scenes, Files, Language, Maintenance) in a scroll
+  area; captions and hints wrap instead of setting the minimum width, drop-downs
+  elide their entries, and the window can be dragged down to a small size
+  without cutting a control off.
 
 - **The scheduled watch records a green compatibility declaration itself.** The
   daily and weekly runs already wake the OBS matrix when OBS publishes anything;
@@ -765,7 +833,8 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
-[Unreleased]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.4...v1.4.0
 [1.3.4]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.2...v1.3.3

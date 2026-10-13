@@ -63,6 +63,9 @@ DeckSettings SettingsStore::loadSettings() const {
     out.relativePaths = o.value("relativePaths").toBool(false);
     out.unmuteOnStart = o.value("unmuteOnStart").toBool(false);
     out.panicScene = o.value("panicScene").toString();
+    out.autoSwitchEnabled = o.value("autoSwitchEnabled").toBool(false);
+    out.autoSwitchScene = o.value("autoSwitchScene").toString();
+    out.autoSwitchEffect = pld::switchEffectFromInt(o.value("autoSwitchEffect").toInt(0));
     out.language = o.value("language").toString("auto");
     out.lastDir = o.value("lastDir").toString();
     return out;
@@ -81,6 +84,9 @@ bool SettingsStore::saveSettings(const DeckSettings& settings) const {
     o["relativePaths"] = settings.relativePaths;
     o["unmuteOnStart"] = settings.unmuteOnStart;
     o["panicScene"] = settings.panicScene;
+    o["autoSwitchEnabled"] = settings.autoSwitchEnabled;
+    o["autoSwitchScene"] = settings.autoSwitchScene;
+    o["autoSwitchEffect"] = static_cast<int>(settings.autoSwitchEffect);
     o["language"] = settings.language;
     o["lastDir"] = settings.lastDir;
     return writeAtomically(path, QJsonDocument(o).toJson(QJsonDocument::Compact));

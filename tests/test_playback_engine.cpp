@@ -384,3 +384,91 @@ TEST_CASE("an explicit request is never blocked by the guard") {
     CHECK(f.engine.prev().index == 0);
     CHECK(f.engine.play(3).index == 3);
 }
+
+// ---- Order: "next" is the item that follows, whatever was edited ----------
+
+// 1.4.1. The staged clip was remembered as a row number. Any edit above it
+// shifted that number onto a different clip, so "Load next (paused)" staged an
+// item that was not the one shown under "then:".
+TEST_CASE("a staged clip follows its item through a reorder") {
+    Fixture f(4);
+    f.engine.setMode(EndMode::LoadNext);
+    f.engine.play(0);
+    f.engine.mediaEnded(); // clip1 is queued
+    REQUIRE(f.engine.pendingStageRow() == 1);
+
+    f.playlist.move(3, 0); // clip3 jumps to the top: clip1 is now row 2, current row 1
+    f.engine.playlistChanged();
+    CHECK(f.engine.pendingStageRow() == 2);
+    CHECK(f.engine.upNextIndex() == 2);
+
+    f.transport.onAir = false;
+    CHECK(f.engine.programLayoutChanged().outcome == PlaybackOutcome::Staged);
+    CHECK(f.transport.lastStaged() == "/media/clip1.mp4");
+}
+
+TEST_CASE("a staged clip follows its item when rows above it are removed") {
+    Fixture f(4);
+    f.engine.setMode(EndMode::LoadNext);
+    f.engine.play(1);
+    f.engine.mediaEnded(); // clip2 is queued
+    REQUIRE(f.engine.pendingStageRow() == 2);
+
+    f.playlist.removeAt(0);
+    f.engine.playlistChanged();
+    CHECK(f.engine.pendingStageRow() == 1);
+    f.transport.onAir = false;
+    f.engine.programLayoutChanged();
+    CHECK(f.transport.lastStaged() == "/media/clip2.mp4");
+}
+
+TEST_CASE("cancelling a stage forgets it") {
+    Fixture f;
+    f.engine.setMode(EndMode::LoadNext);
+    f.engine.play(0);
+    f.engine.mediaEnded();
+    REQUIRE(f.engine.pendingStage());
+    f.engine.cancelStage();
+    CHECK_FALSE(f.engine.pendingStage());
+    f.transport.onAir = false;
+    CHECK(f.engine.programLayoutChanged().outcome == PlaybackOutcome::Nothing);
+}
+
+// Removing the clip that is on air used to send the deck back to the top: the
+// stop it provokes is reported as an end, and with nothing current the end
+// handler began at item 1.
+TEST_CASE("an end with nothing current does not start the list over") {
+    Fixture f;
+    f.engine.setMode(EndMode::PlayNext);
+    f.engine.play(1);
+    f.playlist.removeAt(1);
+    REQUIRE(f.playlist.currentIndex() == -1);
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
+    CHECK(f.transport.played.size() == 1);
+}
+
+TEST_CASE("Next after removing the playing item is the item that followed it") {
+    Fixture f(4);
+    f.engine.play(1);
+    f.playlist.removeAt(1); // clip2 now sits where clip1 was
+    const auto result = f.engine.next();
+    CHECK(result.index == 1);
+    CHECK(f.transport.lastPlayed() == "/media/clip2.mp4");
+}
+
+TEST_CASE("Previous after removing the playing item is the item that preceded it") {
+    Fixture f(4);
+    f.engine.play(2);
+    f.playlist.removeAt(2);
+    const auto result = f.engine.prev();
+    CHECK(result.index == 1);
+    CHECK(f.transport.lastPlayed() == "/media/clip1.mp4");
+}
+
+TEST_CASE("up next after removing the playing item names the item that followed it") {
+    Fixture f(4);
+    f.engine.setMode(EndMode::PlayNext);
+    f.engine.play(1);
+    f.playlist.removeAt(1);
+    CHECK(f.engine.upNextIndex() == 1);
+}

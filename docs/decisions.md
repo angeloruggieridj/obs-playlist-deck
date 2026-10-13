@@ -390,3 +390,52 @@ result until it earns the right to answer, and then it starts answering.
 **Would be wrong if:** OBS moved its FFmpeg requirement again, or a base image
 stopped shipping FFmpeg 8. Either would resurface as the same obs-build failure
 that prompted this, and the boundary would move with it.
+
+## 20. Playback order is tracked by identity, and the ordering side effects are closed (2026-10-13)
+
+"Next" was occasionally not the item after the current one. Reproducing it
+needed no OBS: every cause was an index that outlived the edit it described.
+
+- A clip queued by *Load next (paused)* was kept as a row number. Any move,
+  insert or removal above it shifted the number onto another clip. The engine
+  now stores what the row held (its path) next to the row, and
+  `playlistChanged()` finds it again, picking the occurrence nearest the old row
+  when a file appears twice, and cancelling the stage when it is gone.
+- Removing the playing item left "nothing is current", and "nothing is current"
+  means *start from the top*. `Playlist` now remembers the slot the removed item
+  left (`resumeIndex()`), and the engine counts Next / Previous / "then:" from
+  it. Choosing an item, or reordering, forgets the slot.
+- The stop that follows such a removal is reported by the source as an end. An
+  end with nothing current belongs to no clip, so the engine ignores it (an
+  empty list still stops, as before).
+- Up/Down recorded their undo step after moving, and never told the engine.
+
+What was *not* done: gating `media_ended` on the source's reported state. It
+would also catch a stale end that arrives after a start, but it rests on how
+each source type orders its state change and its signal, which cannot be
+verified without the sources themselves, and being wrong there kills
+auto-advance. The existing start-before-end guard stays the only filter.
+
+## 21. The end-of-item scene switch is a decision in the core, an action in the dock (2026-10-13)
+
+`shouldAutoSwitch()` is pure and tested: off unless enabled and given a scene,
+only when the bound source is in the program scene, nothing when the target is
+already on air. The dock supplies the facts and does the OBS calls. The effect is
+chosen by transition *kind* (`cut_transition`, `fade_transition`,
+`obs_stinger_transition`) rather than by name, because a name is the user's and a
+kind is OBS's. Selecting the transition changes OBS state the operator owns, so
+the previous one is remembered and put back on `TRANSITION_STOPPED` (with a
+timer as a fallback, and at shutdown). In studio mode `set_current_scene` would
+only move the preview, so the scene is set on preview and the transition
+triggered.
+
+## 22. Labels that carry content elide; they do not set the width (2026-10-13)
+
+A `QLabel`'s minimum width is the width of its text. Every line that shows a
+user's text — a title, a playlist name, the status — therefore made the dock as
+wide as the longest thing it had ever shown. `ElidedLabel` reports a small
+minimum, paints what fits and fixes its height to one line, which is also what
+keeps the status line from moving the layout when it fills and empties. Combo
+boxes use a fixed minimum number of characters; list rows report zero width and
+draw to fit. The Settings window follows the same rule (wrapping captions,
+scroll area).

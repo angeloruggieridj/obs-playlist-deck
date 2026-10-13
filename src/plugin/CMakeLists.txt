@@ -37,6 +37,8 @@ add_library(obs-playlist-deck MODULE
   UpdateChecker.cpp
   DeckStyle.cpp
   SettingsStore.cpp
+  DeckWidgets.cpp
+  SettingsDialog.cpp
   ${CMAKE_SOURCE_DIR}/resources/icons.qrc
 )
 

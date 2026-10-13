@@ -7,6 +7,7 @@
 #include "EndMode.hpp"
 #include "Library.hpp"
 #include "Playlist.hpp"
+#include "SceneSwitch.hpp"
 
 // Everything the deck remembers between sessions, apart from the playlists
 // themselves (those are the library).
@@ -24,6 +25,12 @@ struct DeckSettings {
     bool unmuteOnStart = false;
     // Scene the panic button cuts to. Empty means panic only stops playback.
     QString panicScene;
+    // Optional: when an item ends while it is on air, go to this scene with this
+    // effect. Off by default - a deck that changes the program scene by itself
+    // is doing something the operator has to have asked for.
+    bool autoSwitchEnabled = false;
+    QString autoSwitchScene;
+    pld::SwitchEffect autoSwitchEffect = pld::SwitchEffect::Cut;
     QString language = "auto"; // "auto" (follow OBS) | "en-US" | "it-IT" | ...
     QString lastDir;           // last folder used in a file dialog
 };

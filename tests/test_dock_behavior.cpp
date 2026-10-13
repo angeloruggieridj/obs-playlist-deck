@@ -559,3 +559,82 @@ TEST_CASE("no icon ships without being used") {
         ++entries;
     CHECK(entries == 24);
 }
+
+// 1.4.1, order. The undo step for Up/Down was recorded after the move, so it
+// held the already-moved list, and neither told the engine: a staged clip kept
+// the row number it had before the move.
+TEST_CASE("Up and Down record the undo step first and tell the engine") {
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    for (const char* signature : {"void PlaylistDock::onUp()", "void PlaylistDock::onDown()"}) {
+        CAPTURE(signature);
+        const std::string body = bodyOf(dock, signature);
+        REQUIRE_FALSE(body.empty());
+        const auto undo = body.find("recordUndo");
+        const auto move = body.find("playlist_.move");
+        REQUIRE(undo != std::string::npos);
+        REQUIRE(move != std::string::npos);
+        CHECK(undo < move);
+        CHECK(body.find("engine_.playlistChanged()") != std::string::npos);
+    }
+    // Panic and a released source forget a staged clip instead of leaving it to
+    // load later.
+    CHECK(bodyOf(dock, "void PlaylistDock::onPanic()").find("engine_.cancelStage()") !=
+          std::string::npos);
+    CHECK(bodyOf(dock, "void PlaylistDock::releaseSource()").find("engine_.cancelStage()") !=
+          std::string::npos);
+}
+
+// 1.4.1, width. A long title must shorten, never set the minimum width of the
+// dock, and the duration stays visible.
+TEST_CASE("long titles elide instead of widening the dock") {
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    const std::string widgets = readSource("src/plugin/DeckWidgets.cpp");
+
+    for (const char* label : {"nowTitle_ = nowTitle", "upNext_ = upNext", "status_ = status",
+                              "loadedLabel_ = loaded", "totalsLabel_ = totals"}) {
+        CAPTURE(label);
+        CHECK(dock.find(label) != std::string::npos);
+    }
+    CHECK(dock.find("new ElidedLabel(") != std::string::npos);
+    // A plain wrapping label is what made the status line move the layout.
+    CHECK(dock.find("status_->setWordWrap(true)") == std::string::npos);
+    // Combo boxes are sized to a fixed number of characters, not to their
+    // longest entry.
+    CHECK(dock.find("AdjustToMinimumContentsLengthWithIcon") != std::string::npos);
+    // A list row never asks for the width of its whole title.
+    const std::string size = bodyOf(dock, "QSize sizeHint(const QStyleOptionViewItem& option");
+    CHECK(size.find("setWidth(0)") != std::string::npos);
+    // The label reports a small minimum and a one-line fixed height.
+    CHECK(widgets.find("QSizePolicy::Fixed") != std::string::npos);
+    CHECK(bodyOf(widgets, "QSize ElidedLabel::minimumSizeHint").find("MMM") != std::string::npos);
+}
+
+// 1.4.1, settings. The panic scene is chosen from the scenes OBS has right now,
+// not typed; and the automatic scene switch is off unless asked for.
+TEST_CASE("scenes are picked from the live list, and the automatic switch is opt-in") {
+    const std::string dialog = readSource("src/plugin/SettingsDialog.cpp");
+    const std::string widgets = readSource("src/plugin/DeckWidgets.cpp");
+    const std::string store = readSource("src/plugin/SettingsStore.hpp");
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+
+    CHECK(dialog.find("QLineEdit") == std::string::npos);
+    CHECK(dialog.find("panicScene_ = new SceneComboBox") != std::string::npos);
+    CHECK(widgets.find("obs_frontend_get_scenes") != std::string::npos);
+    // Read again each time the list is opened.
+    CHECK(bodyOf(widgets, "void SceneComboBox::showPopup").find("populate(") != std::string::npos);
+    CHECK(store.find("bool autoSwitchEnabled = false;") != std::string::npos);
+
+    const std::string run = bodyOf(dock, "void PlaylistDock::runAutoSwitch()");
+    REQUIRE_FALSE(run.empty());
+    CHECK(run.find("shouldAutoSwitch") != std::string::npos);
+    CHECK(run.find("obs_frontend_set_current_transition") != std::string::npos);
+    CHECK(run.find("obs_frontend_preview_program_trigger_transition") != std::string::npos);
+    // It is the end of a real item that triggers it, not any media_ended.
+    const std::string ended = bodyOf(dock, "void PlaylistDock::onMediaEnded()");
+    CHECK(ended.find("PlaybackOutcome::Nothing") != std::string::npos);
+    CHECK(ended.find("runAutoSwitch()") != std::string::npos);
+    // The operator's own transition is put back.
+    CHECK(dock.find("transitionToRestore_") != std::string::npos);
+    CHECK(readSource("src/plugin/plugin-main.cpp").find("transitionStopped()") !=
+          std::string::npos);
+}

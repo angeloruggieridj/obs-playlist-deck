@@ -113,7 +113,8 @@ TEST_CASE("update check failures are visible, not only logged") {
     CHECK(dock.find("Status.UpToDate") != std::string::npos);
     CHECK(dock.find("Status.UpdateAvailable") != std::string::npos);
     // And there is a way to ask again without restarting OBS.
-    CHECK(dock.find("Btn.CheckUpdates") != std::string::npos);
+    CHECK(readSource("src/plugin/SettingsDialog.cpp").find("Btn.CheckUpdates") !=
+          std::string::npos);
     CHECK(dock.find("updateChecker_->check(true)") != std::string::npos);
     // The automatic startup check stays silent on failure.
     CHECK(dock.find("updateChecker_->check(false)") != std::string::npos);

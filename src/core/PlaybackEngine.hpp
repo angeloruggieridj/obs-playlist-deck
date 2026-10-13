@@ -88,13 +88,23 @@ public:
     int upNextIndex() const;
 
     // The playlist changed under us: the shuffle bag's indices no longer mean
-    // anything, and a pending stage may point at an item that is gone.
+    // anything, and a pending stage must follow its clip to wherever the edit
+    // moved it, or be dropped when the clip is gone.
     void playlistChanged();
+
+    // Forget a staged clip without loading it (panic, a source being released).
+    void cancelStage();
 
 private:
     PlaybackResult startAt(int index);
     PlaybackResult stageAt(int index);
     int drawShuffle();
+    // The index "what comes next" is counted from. It is the current item, or -
+    // when that item was removed while it played - the slot just before the row
+    // that took its place, so Next still means the item that followed it.
+    int anchorForward() const;
+    // The same, for "previous": counted from the slot itself.
+    int anchorBackward() const;
 
     Playlist& playlist_;
     IMediaTransport& transport_;
@@ -103,6 +113,9 @@ private:
     ShuffleQueue shuffle_;
     bool pendingStage_ = false;
     int pendingStageRow_ = -1;
+    // What the staged row held when it was queued. A row number is only an
+    // address; after a reorder or a removal it names a different clip.
+    std::string pendingStagePath_;
     // True from the moment a file is handed to the source until that source
     // says it started playing it.
     bool awaitingStart_ = false;

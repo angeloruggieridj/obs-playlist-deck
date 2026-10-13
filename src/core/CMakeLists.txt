@@ -11,6 +11,7 @@ add_library(playlist-deck-core STATIC
   PlaybackEngine.cpp
   Library.cpp
   Heal.cpp
+  SceneSwitch.cpp
 )
 target_include_directories(playlist-deck-core
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

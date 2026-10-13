@@ -59,8 +59,13 @@ static void on_frontend_event(enum obs_frontend_event event, void*) {
     case OBS_FRONTEND_EVENT_PREVIEW_SCENE_CHANGED:
     case OBS_FRONTEND_EVENT_STUDIO_MODE_ENABLED:
     case OBS_FRONTEND_EVENT_STUDIO_MODE_DISABLED:
-    case OBS_FRONTEND_EVENT_TRANSITION_STOPPED:
         if (g_dock) g_dock->programLayoutChanged();
+        break;
+    case OBS_FRONTEND_EVENT_TRANSITION_STOPPED:
+        if (g_dock) {
+            g_dock->programLayoutChanged();
+            g_dock->transitionStopped();
+        }
         break;
     case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING:
         // The dock keeps a strong obs_source_t reference while bound. It must
