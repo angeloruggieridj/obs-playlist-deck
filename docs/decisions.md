@@ -439,3 +439,20 @@ keeps the status line from moving the layout when it fills and empties. Combo
 boxes use a fixed minimum number of characters; list rows report zero width and
 draw to fit. The Settings window follows the same rule (wrapping captions,
 scroll area).
+
+## 23. A timed-out artifact transfer is retried too (2026-10-13)
+
+The macOS job of the run that followed 1.4.1 failed in `actions/upload-artifact`
+with `Failed to CreateArtifact: Unable to make request: ETIMEDOUT` after the
+build itself had succeeded. §18's rerun looks for a job with zero steps, so it
+rightly skipped this one, and the run stayed red until a human reran it.
+
+`rerun-infra-failure` now recognises a second signature: every failed step of
+every failed job is an artifact upload, an artifact download or a cache step.
+Those only move bytes between runners and storage, so no commit can make them
+fail. It then reruns the failed jobs (`--failed`, which restarts their
+dependents with them), still bounded by `run_attempt < 3`. One failed step of
+any other kind anywhere in the run means a real failure, and nothing is rerun.
+
+**Would be wrong if:** a build step were ever named like one of those actions
+and failed for a real reason — it would be retried twice before staying red.

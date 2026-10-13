@@ -7,6 +7,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **A timed-out artifact upload is retried automatically.** After 1.4.1 a green
+  macOS build failed in `actions/upload-artifact` with `ETIMEDOUT` and stayed
+  red until rerun by hand. The retry workflow now also reruns the failed jobs
+  when the only failing steps are artifact uploads, downloads or cache steps,
+  still at most twice; any other failed step is treated as a real failure. See
+  [docs/decisions.md](docs/decisions.md) §23.
+
 ## [1.4.1] — 2026-10-13
 
 The deck now plays strictly in list order, a long title no longer decides how

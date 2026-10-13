@@ -12,6 +12,14 @@ name: Rerun infrastructure failures
 # that had `needs:` on it -- are *not* failed, so only a full rerun restarts
 # them; `gh run rerun --failed` would restart nothing but the one cancelled job.
 #
+# The second signature is a transfer that timed out: a job whose only failing
+# step is an artifact upload or download or a cache restore ("Failed to
+# CreateArtifact: Unable to make request: ETIMEDOUT" cost a green macOS build on
+# 2026-10-13). Those steps move bytes between runners and storage; no commit can
+# make them fail. Only the failed jobs are rerun, since their dependents are
+# restarted with them. If any failed job failed in any other step, it is a real
+# failure and nothing is rerun.
+#
 # The retry is bounded by run_attempt, so a genuinely broken pool cannot spin:
 # at most two automatic retries, then it stays red for a human.
 
@@ -46,9 +54,21 @@ jobs:
                     | select((.steps | length) == 0)
                     | select(.conclusion == "cancelled" or .conclusion == "failure")]
                   | length')"
-          if [ "$unacquired" -eq 0 ]; then
-            echo "no job was left unacquired; this was a real failure, not a rerun candidate"
+          if [ "$unacquired" -gt 0 ]; then
+            echo "$unacquired job(s) never got a runner; rerunning the whole run"
+            gh run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY"
             exit 0
           fi
-          echo "$unacquired job(s) never got a runner; rerunning the whole run"
-          gh run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY"
+
+          # Failed steps of every failed job, split into transfer steps and the
+          # rest. The step name is "Run <action>@<sha>" for an action.
+          steps="$(gh api             "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100"             --jq '[.jobs[] | select(.conclusion == "failure")
+                   | .steps[] | select(.conclusion == "failure") | .name]')"
+          transfer="$(jq '[.[] | select(test("^Run actions/(upload-artifact|download-artifact|cache)"))] | length' <<<"$steps")"
+          other="$(jq '[.[] | select(test("^Run actions/(upload-artifact|download-artifact|cache)") | not)] | length' <<<"$steps")"
+          if [ "$transfer" -gt 0 ] && [ "$other" -eq 0 ]; then
+            echo "only artifact/cache transfer steps failed; rerunning the failed jobs"
+            gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
+            exit 0
+          fi
+          echo "no infrastructure signature; this was a real failure, not a rerun candidate"
