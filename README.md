@@ -82,6 +82,8 @@ hand while live. No browser source, no embedded web server: pure OBS + Qt.
 - 🚨 **Panic**: one button (and hotkey, and Stream Deck key) stops playback and
   cuts to a scene you nominate — a stopped media source holds its last frame,
   so stopping alone is not enough.
+- 🎬 **Switch scene when an item ends** (off by default): cut, fade or stinger to
+  a scene you choose, only when the item was on air.
 - 🩹 **Find moved files**: when files are reorganised between shows, the deck
   looks for them by name where its other files live.
 - 🔇 **Mute** the bound source from the card, with an optional "unmute when a
@@ -252,10 +254,17 @@ are kept and **Settings → Restore a backup…** brings one back (backing up wh
 you have first). A `session.json` from 1.3.x becomes the library's first
 playlist on upgrade, and is left in place so downgrading loses nothing.
 
-**Panic** stops playback and cuts to the scene named in Settings. Without a
-scene configured it still stops, and says so. It is on a button, an OBS hotkey,
+**Panic** stops playback and cuts to the scene picked in Settings (a list of the
+scenes OBS has right now). Without a scene configured it still stops, and says
+so. It is on a button, an OBS hotkey,
 a Stream Deck key and the remote API, because that is a thing you press without
 looking.
+
+**Switch scene when an item ends** is in Settings → Scenes and is off until you
+turn it on. Choose the scene and the effect — Cut, Fade or Stinger (the first
+Stinger transition set up in OBS). It acts when an item that is on air really
+ends, never when the source is off air or the scene is already the one on air,
+and the transition you had selected in OBS is put back afterwards.
 
 **Find moved files** (list context menu) searches the folders your other clips
 live in, the watch folder and the playlist's own folder for a file with the same

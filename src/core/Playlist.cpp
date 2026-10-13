@@ -10,15 +10,23 @@ bool Playlist::insert(int index, const PlaylistItem& it) {
     if (index < 0 || index > size()) return false;
     items_.insert(items_.begin() + index, it);
     if (current_ >= index) ++current_;
+    if (resume_ >= 0 && resume_ > index) ++resume_;
     return true;
 }
 
 bool Playlist::removeAt(int index) {
     if (index < 0 || index >= size()) return false;
     items_.erase(items_.begin() + index);
-    if (empty()) { current_ = -1; }
-    else if (index < current_) { --current_; }
-    else if (index == current_) { current_ = -1; } // the playing item is gone
+    if (empty()) { current_ = -1; resume_ = -1; return true; }
+    if (index < current_) { --current_; }
+    else if (index == current_) {
+        // The playing item is gone. "Next" must still mean the item that
+        // followed it, not the top of the list, so the slot is remembered.
+        current_ = -1;
+        resume_ = index;
+        return true;
+    }
+    if (current_ < 0 && resume_ >= 0 && index < resume_) --resume_;
     return true;
 }
 
@@ -33,11 +41,12 @@ int Playlist::removeMany(std::vector<int> indices) {
     return removed;
 }
 
-void Playlist::clear() { items_.clear(); current_ = -1; }
+void Playlist::clear() { items_.clear(); current_ = -1; resume_ = -1; }
 
 bool Playlist::move(int from, int to) {
     if (from < 0 || from >= size() || to < 0 || to >= size()) return false;
     if (from == to) return true;
+    resume_ = -1; // the slot it pointed at no longer holds the same neighbours
     PlaylistItem it = items_[from];
     items_.erase(items_.begin() + from);
     items_.insert(items_.begin() + to, it);
@@ -57,6 +66,7 @@ bool Playlist::setCurrent(int index) {
     if (index == -1) { current_ = -1; return true; }
     if (index < 0 || index >= size()) return false;
     current_ = index;
+    resume_ = -1;
     return true;
 }
 
@@ -86,12 +96,14 @@ int Playlist::prev(bool wrap) {
 void Playlist::setItems(std::vector<PlaylistItem> items) {
     items_ = std::move(items);
     current_ = -1;
+    resume_ = -1;
 }
 
 void Playlist::setItemsKeepCurrent(std::vector<PlaylistItem> items) {
     const int keep = current_;
     items_ = std::move(items);
     current_ = (keep >= 0 && keep < size()) ? keep : -1;
+    if (current_ >= 0) resume_ = -1;
 }
 
 long long Playlist::totalDurationMs() const {

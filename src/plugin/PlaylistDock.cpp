@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "PlaylistDock.hpp"
 #include "DeckStyle.hpp"
+#include "DeckWidgets.hpp"
 #include "Format.hpp"
 #include "Heal.hpp"
 #include "MediaPath.hpp"
@@ -8,6 +9,8 @@
 #include "PlaylistModel.hpp"
 #include "PlaylistView.hpp"
 #include "Schedule.hpp"
+#include "SceneSwitch.hpp"
+#include "SettingsDialog.hpp"
 #include "UpdateChecker.hpp"
 #include "VendorBridge.hpp"
 #include "Version.hpp"
@@ -65,6 +68,7 @@
 #include <QWidget>
 
 #include <algorithm>
+#include <cstring>
 #include <set>
 #include <utility>
 
@@ -93,6 +97,7 @@ constexpr int kLibraryDebounceMs = 800;  // coalesces bursts of library writes
 constexpr int kWatchDebounceMs = 1200;   // lets a file finish being copied in
 constexpr int kDurationRetryMs = 400;    // re-read a duration the decoder had not filled in
 constexpr int kDurationRetries = 4;
+constexpr int kTransitionRestoreMs = 20000; // gives up waiting for the stop event after this
 constexpr int kScheduleWarnSeconds = 10; // how early the countdown appears
 constexpr qint64 kStateEventMs = 1000;   // vendor playback-state event rate
 constexpr qint64 kMaxPlaylistBytes = 10ll * 1024 * 1024; // refuse absurd playlist files
@@ -107,6 +112,10 @@ public:
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
         QSize s = QStyledItemDelegate::sizeHint(option, index);
         s.setHeight(std::max(s.height(), pld::style::kRowPx));
+        // The row is drawn to fit whatever width the list has - the title is
+        // elided, the duration kept - so it never asks for more. Reporting the
+        // width of the full title is what made a long one hold the dock open.
+        s.setWidth(0);
         return s;
     }
 
@@ -167,6 +176,14 @@ public:
         painter->restore();
     }
 };
+
+// A combo box sizes itself to its longest entry by default, so one long playlist
+// or source name set the minimum width of the whole dock. Sized to a fixed
+// number of characters instead, it shows what fits and elides the rest.
+void keepComboNarrow(QComboBox* combo) {
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setMinimumContentsLength(8);
+}
 
 // Media files in a folder, sorted the way people read numbers.
 QStringList mediaFilesIn(const QString& dir, bool recursive) {
@@ -273,6 +290,7 @@ void PlaylistDock::shutdown() {
     if (obsShutdown_) return;
     obsShutdown_ = true;
     saveSettings();
+    restoreTransition(); // never leave OBS on a transition this plugin chose
     // Flush a debounced write rather than losing the last edits, and keep one
     // backup of how the library looked at the end of the show.
     if (libraryTimer_) libraryTimer_->stop();
@@ -293,7 +311,7 @@ void PlaylistDock::shutdown() {
 }
 
 void PlaylistDock::releaseSource() {
-    engine_.playlistChanged(); // drops a staged clip whose binding is going away
+    engine_.cancelStage(); // a staged clip must not outlive the source it was for
     // Keep the user's choice across the collection swap so it is restored when
     // they switch back to the collection that owns this source.
     if (controller_.isBound()) settings_.source = QString::fromStdString(controller_.boundName());
@@ -432,6 +450,7 @@ void PlaylistDock::buildUi() {
     libRow->addWidget(inlineLabel(T("Section.Playlists")));
     playlistCombo_ = new QComboBox();
     playlistCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    keepComboNarrow(playlistCombo_);
     playlistCombo_->setMinimumHeight(kButtonPx);
     playlistCombo_->setAccessibleName(T("Section.Playlists"));
     auto* libMenuBtn = mk(":/icons/library.svg", T("Btn.PlaylistMenu"), T("Tip.PlaylistMenu"));
@@ -445,6 +464,7 @@ void PlaylistDock::buildUi() {
     srcRow->addWidget(inlineLabel(T("Section.MediaSource")));
     sourceCombo_ = new QComboBox();
     sourceCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    keepComboNarrow(sourceCombo_);
     sourceCombo_->setMinimumHeight(kButtonPx);
     sourceCombo_->setAccessibleName(T("Section.MediaSource"));
     auto* refreshBtn = mk(":/icons/refresh.svg", T("Btn.Refresh"), T("Tip.Refresh"));
@@ -465,13 +485,16 @@ void PlaylistDock::buildUi() {
     titleRow->setSpacing(6);
     auto* nowIcon = new QLabel();
     nowIcon->setPixmap(tintedIcon(":/icons/music.svg").pixmap(kIconPx, kIconPx));
-    nowTitle_ = new QLabel(T("Card.Idle"));
+    auto* nowTitle = new ElidedLabel(T("Card.Idle"));
+    nowTitle_ = nowTitle;
     QFont titleFont = nowTitle_->font();
     titleFont.setBold(true);
     nowTitle_->setFont(titleFont);
     nowTitle_->setAccessibleName(T("Card.NowPlaying"));
     nowMeta_ = new QLabel();
     nowMeta_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    // The title shortens to make room; the duration never does.
+    nowMeta_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     titleRow->addWidget(nowIcon);
     titleRow->addWidget(nowTitle_, 1);
     titleRow->addWidget(nowMeta_);
@@ -490,11 +513,13 @@ void PlaylistDock::buildUi() {
     // Tabular figures: a proportional font makes the counter jitter as digits
     // change, which is exactly what peripheral vision notices.
     timeLabel_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    upNext_ = new QLabel();
-    upNext_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    timeLabel_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    auto* upNext = new ElidedLabel();
+    upNext->setAutoToolTip(true);
+    upNext->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    upNext_ = upNext;
     timeRow->addWidget(timeLabel_);
-    timeRow->addStretch(1);
-    timeRow->addWidget(upNext_);
+    timeRow->addWidget(upNext_, 1);
     cardCol->addLayout(timeRow);
 
     auto* trRow = new QHBoxLayout();
@@ -534,6 +559,8 @@ void PlaylistDock::buildUi() {
     list_->setModel(model_);
     list_->setItemDelegate(new ItemDelegate(list_));
     list_->setPlaceholder(T("Empty.Title"), T("Empty.Hint"));
+    list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    list_->setTextElideMode(Qt::ElideMiddle);
     col->addWidget(list_, 1);
 
     // ---- Ops toolbar, attached under the thing it edits --------------------
@@ -549,7 +576,11 @@ void PlaylistDock::buildUi() {
     for (auto* b : {addBtn, rmBtn, upBtn, downBtn, renameBtn, clrBtn, undoBtn_})
         opsRow->addWidget(b);
     opsRow->addStretch(1);
-    totalsLabel_ = new QLabel();
+    // Shortens before it widens the dock: the buttons beside it are the part
+    // that must stay whole.
+    auto* totals = new ElidedLabel();
+    totals->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    totalsLabel_ = totals;
     opsRow->addWidget(totalsLabel_);
     col->addLayout(opsRow);
 
@@ -568,6 +599,7 @@ void PlaylistDock::buildUi() {
     const int modeIdx = endCombo_->findData(static_cast<int>(engine_.mode()));
     endCombo_->setCurrentIndex(modeIdx >= 0 ? modeIdx : 0);
     endCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    keepComboNarrow(endCombo_);
     auto* saveBtn = mk(":/icons/save.svg", T("Btn.Save"), T("Tip.Save"));
     auto* openBtn = mk(":/icons/folder-open.svg", T("Btn.Open"), T("Tip.Open"));
     endRow->addWidget(endCombo_, 1);
@@ -575,12 +607,19 @@ void PlaylistDock::buildUi() {
     endRow->addWidget(openBtn);
     col->addLayout(endRow);
 
-    loadedLabel_ = new QLabel(T("NoPlaylist"));
-    loadedLabel_->setWordWrap(true);
+    auto* loaded = new ElidedLabel(T("NoPlaylist"));
+    loaded->setAutoToolTip(true);
+    loadedLabel_ = loaded;
     col->addWidget(loadedLabel_);
 
-    status_ = new QLabel("");
-    status_->setWordWrap(true);
+    // One line, always reserved. The status text comes and goes after almost
+    // every action; a wrapping label that was empty and then not made the whole
+    // dock grow and shrink under the operator's hand each time. Here it only
+    // changes what is drawn: a longer message is shortened, with the full text
+    // in the tooltip.
+    auto* status = new ElidedLabel();
+    status->setAutoToolTip(true);
+    status_ = status;
     col->addWidget(status_);
 
     versionLabel_ = new QLabel(QStringLiteral("v%1").arg(PLD_VERSION));
@@ -802,10 +841,7 @@ void PlaylistDock::updateNowPlaying() {
         if (seek_ && !seek_->isSliderDown()) seek_->setValue(0);
         if (timeLabel_) timeLabel_->clear();
     } else {
-        const QString title = QString::fromStdString(it->title);
-        const QFontMetrics fm(nowTitle_->font());
-        const int w = std::max(60, nowTitle_->width());
-        nowTitle_->setText(fm.elidedText(title, Qt::ElideMiddle, w));
+        nowTitle_->setText(QString::fromStdString(it->title));
         nowTitle_->setToolTip(QString::fromStdString(it->path));
         nowMeta_->setText(QString::fromStdString(formatDuration(it->durationMs)));
     }
@@ -938,8 +974,112 @@ void PlaylistDock::onMediaStarted() {
 }
 
 void PlaylistDock::onMediaEnded() {
-    applyPlayback(engine_.mediaEnded());
+    const auto result = engine_.mediaEnded();
+    applyPlayback(result);
     snapshotStatus();
+    // The engine answers "nothing to do" for an end that is not one - the
+    // outgoing clip's, or one with nothing current - and only a real end may
+    // move the program scene.
+    if (result.outcome != pld::PlaybackOutcome::Nothing) runAutoSwitch();
+}
+
+// Opt-in: when an item that was on air finishes, go to the scene the operator
+// chose, with the effect they chose (see SceneSwitch.hpp for when it applies).
+void PlaylistDock::runAutoSwitch() {
+    if (!settings_.autoSwitchEnabled || settings_.autoSwitchScene.isEmpty()) return;
+
+    obs_source_t* target =
+        obs_get_source_by_name(settings_.autoSwitchScene.toUtf8().constData());
+    if (!target || !obs_scene_from_source(target)) {
+        if (target) obs_source_release(target);
+        setStatus(T("Status.AutoSwitchSceneMissing").arg(settings_.autoSwitchScene),
+                  StatusKind::Error);
+        return;
+    }
+
+    pld::AutoSwitchContext context;
+    context.enabled = settings_.autoSwitchEnabled;
+    context.sceneChosen = true;
+    context.sourceInProgram = controller_.isInProgram();
+    obs_source_t* program = obs_frontend_get_current_scene();
+    context.alreadyThere = (program == target);
+    if (program) obs_source_release(program);
+    if (!pld::shouldAutoSwitch(context)) {
+        obs_source_release(target);
+        return;
+    }
+
+    // The effect is a transition kind. The one OBS has selected is put back once
+    // this switch is over, so the operator's own choice is not left changed.
+    const pld::SwitchEffect effect = settings_.autoSwitchEffect;
+    obs_source_t* wanted = nullptr;
+    struct obs_frontend_source_list transitions = {};
+    obs_frontend_get_transitions(&transitions);
+    for (size_t i = 0; i < transitions.sources.num; ++i) {
+        obs_source_t* candidate = transitions.sources.array[i];
+        const char* id = obs_source_get_id(candidate);
+        if (id && std::strcmp(id, pld::transitionIdFor(effect)) == 0) {
+            wanted = obs_source_get_ref(candidate);
+            break;
+        }
+    }
+    obs_frontend_source_list_free(&transitions);
+
+    const bool haveTransition = (wanted != nullptr);
+    if (wanted) {
+        obs_source_t* current = obs_frontend_get_current_transition();
+        if (current != wanted) {
+            if (transitionToRestore_.isEmpty() && current)
+                transitionToRestore_ = QString::fromUtf8(obs_source_get_name(current));
+            obs_frontend_set_current_transition(wanted);
+        }
+        if (current) obs_source_release(current);
+        obs_source_release(wanted);
+    } else {
+        setStatus(T("Status.AutoSwitchNoTransition").arg(T(pld::switchEffectKey(effect))),
+                  StatusKind::Warning);
+    }
+
+    // In studio mode the program scene only changes through a transition from
+    // preview; outside it, setting the scene is the transition.
+    if (obs_frontend_preview_program_mode_active()) {
+        obs_frontend_set_current_preview_scene(target);
+        obs_frontend_preview_program_trigger_transition();
+    } else {
+        obs_frontend_set_current_scene(target);
+    }
+    obs_source_release(target);
+
+    if (haveTransition)
+        setStatus(T("Status.AutoSwitched")
+                      .arg(settings_.autoSwitchScene, T(pld::switchEffectKey(effect))),
+                  StatusKind::Info);
+    if (!transitionToRestore_.isEmpty())
+        QTimer::singleShot(kTransitionRestoreMs, this, [this]() { restoreTransition(); });
+}
+
+void PlaylistDock::transitionStopped() {
+    if (transitionToRestore_.isEmpty()) return;
+    // Out of the frontend callback, and after OBS has finished with the
+    // transition that just ended.
+    QTimer::singleShot(0, this, [this]() { restoreTransition(); });
+}
+
+void PlaylistDock::restoreTransition() {
+    if (transitionToRestore_.isEmpty()) return;
+    const QString name = transitionToRestore_;
+    transitionToRestore_.clear();
+    struct obs_frontend_source_list transitions = {};
+    obs_frontend_get_transitions(&transitions);
+    for (size_t i = 0; i < transitions.sources.num; ++i) {
+        obs_source_t* candidate = transitions.sources.array[i];
+        const char* candidateName = obs_source_get_name(candidate);
+        if (candidateName && name == QString::fromUtf8(candidateName)) {
+            obs_frontend_set_current_transition(candidate);
+            break;
+        }
+    }
+    obs_frontend_source_list_free(&transitions);
 }
 
 void PlaylistDock::programLayoutChanged() {
@@ -1251,24 +1391,31 @@ void PlaylistDock::removeRows(std::vector<int> rows) {
 
 void PlaylistDock::onUp() {
     const int r = list_ ? list_->currentIndex().row() : -1;
-    if (playlist_.moveUp(r)) {
-        recordUndo(T("Edit.Move"));
-        rebuildList();
-        list_->setCurrentIndex(model_->index(r - 1));
-        updateNowPlaying();
-        emitPlaylistChanged("moved");
-    }
+    if (r <= 0 || r >= playlist_.size()) return;
+    // The state to come back to is the one before the move: it has to be
+    // recorded first. Recording after it stored the already-moved list, so Undo
+    // appeared to do nothing.
+    recordUndo(T("Edit.Move"));
+    if (!playlist_.moveUp(r)) return;
+    // The shuffle bag and a staged clip hold positions; they were left pointing
+    // at the old order, so "then:" named one item and the deck loaded another.
+    engine_.playlistChanged();
+    rebuildList();
+    list_->setCurrentIndex(model_->index(r - 1));
+    updateNowPlaying();
+    emitPlaylistChanged("moved");
 }
 
 void PlaylistDock::onDown() {
     const int r = list_ ? list_->currentIndex().row() : -1;
-    if (playlist_.moveDown(r)) {
-        recordUndo(T("Edit.Move"));
-        rebuildList();
-        list_->setCurrentIndex(model_->index(r + 1));
-        updateNowPlaying();
-        emitPlaylistChanged("moved");
-    }
+    if (r < 0 || r >= playlist_.size() - 1) return;
+    recordUndo(T("Edit.Move")); // before the move, see onUp()
+    if (!playlist_.moveDown(r)) return;
+    engine_.playlistChanged();
+    rebuildList();
+    list_->setCurrentIndex(model_->index(r + 1));
+    updateNowPlaying();
+    emitPlaylistChanged("moved");
 }
 
 void PlaylistDock::onClear() {
@@ -1386,7 +1533,7 @@ void PlaylistDock::onMuteChanged(bool muted) {
 // frame, so the deck also cuts to a scene the operator nominated.
 void PlaylistDock::onPanic() {
     controller_.stop();
-    engine_.playlistChanged(); // whatever was staged is not what anyone wants now
+    engine_.cancelStage(); // whatever was staged is not what anyone wants now
     updateTransportIcons();
 
     if (settings_.panicScene.isEmpty()) {
@@ -2114,51 +2261,9 @@ void PlaylistDock::applyLocaleAndRebuild() {
 }
 
 void PlaylistDock::onOpenSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle(T("Settings.Title"));
-    auto* form = new QFormLayout(&dlg);
+    SettingsDialog dlg(settings_, this);
 
-    auto* probeChk = new QCheckBox(T("Settings.Probe"));
-    probeChk->setChecked(settings_.enableProbe);
-    form->addRow(probeChk);
-
-    auto* relativeChk = new QCheckBox(T("Settings.RelativePaths"));
-    relativeChk->setChecked(settings_.relativePaths);
-    relativeChk->setToolTip(T("Settings.RelativePathsTip"));
-    form->addRow(relativeChk);
-
-    auto* unmuteChk = new QCheckBox(T("Settings.UnmuteOnStart"));
-    unmuteChk->setChecked(settings_.unmuteOnStart);
-    unmuteChk->setToolTip(T("Settings.UnmuteOnStartTip"));
-    form->addRow(unmuteChk);
-
-    auto* panicEdit = new QLineEdit(settings_.panicScene);
-    panicEdit->setPlaceholderText(T("Settings.PanicSceneNone"));
-    panicEdit->setToolTip(T("Settings.PanicSceneTip"));
-    form->addRow(new QLabel(T("Settings.PanicScene")), panicEdit);
-
-    auto* langCombo = new QComboBox();
-    langCombo->addItem(T("Lang.Auto"), "auto");
-    // Endonyms, not translations: they have to name the language to someone who
-    // cannot read the current UI. fromUtf8() states the source encoding rather
-    // than trusting the compiler's default narrow-literal charset (see the
-    // /utf-8 flag in CMakeLists.txt).
-    langCombo->addItem(QStringLiteral("English"), "en-US");
-    langCombo->addItem(QStringLiteral("Italiano"), "it-IT");
-    langCombo->addItem(QString::fromUtf8("Español"), "es-ES");
-    langCombo->addItem(QString::fromUtf8("Français"), "fr-FR");
-    langCombo->addItem(QStringLiteral("Deutsch"), "de-DE");
-    langCombo->addItem(QString::fromUtf8("Português (BR)"), "pt-BR");
-    langCombo->addItem(QString::fromUtf8("Русский"), "ru-RU");
-    langCombo->addItem(QString::fromUtf8("简体中文"), "zh-CN");
-    langCombo->addItem(QString::fromUtf8("日本語"), "ja-JP");
-    langCombo->addItem(QString::fromUtf8("한국어"), "ko-KR");
-    const int li = langCombo->findData(settings_.language);
-    langCombo->setCurrentIndex(li >= 0 ? li : 0);
-    form->addRow(new QLabel(T("Settings.Language")), langCombo);
-
-    auto* restoreBtn = new QPushButton(T("Btn.RestoreBackup"));
-    connect(restoreBtn, &QPushButton::clicked, &dlg, [this, &dlg]() {
+    connect(&dlg, &SettingsDialog::restoreBackupRequested, this, [this, &dlg]() {
         const QStringList list = store_.backups();
         if (list.isEmpty()) {
             setStatus(T("Status.NoBackups"), StatusKind::Info);
@@ -2189,30 +2294,18 @@ void PlaylistDock::onOpenSettings() {
         saveLibraryNow();
         setStatus(T("Status.BackupRestored"), StatusKind::Success);
     });
-    form->addRow(restoreBtn);
 
     // The automatic check runs once at OBS startup; this is the way to ask again
     // without restarting, and it reports the outcome in the status line.
-    auto* updateBtn = new QPushButton(T("Btn.CheckUpdates"));
-    connect(updateBtn, &QPushButton::clicked, this, [this]() {
+    connect(&dlg, &SettingsDialog::checkUpdatesRequested, this, [this]() {
         if (!updateChecker_) return;
         if (updateChecker_->check(true)) setStatus(T("Status.UpdateChecking"), StatusKind::Info);
     });
-    form->addRow(updateBtn);
-
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    form->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
 
     if (dlg.exec() != QDialog::Accepted) return;
-    settings_.enableProbe = probeChk->isChecked();
-    settings_.relativePaths = relativeChk->isChecked();
-    settings_.unmuteOnStart = unmuteChk->isChecked();
-    settings_.panicScene = panicEdit->text().trimmed();
-    const QString newLang = langCombo->currentData().toString();
-    const bool langChanged = (newLang != settings_.language);
-    settings_.language = newLang;
+    const DeckSettings edited = dlg.result();
+    const bool langChanged = (edited.language != settings_.language);
+    settings_ = edited;
     saveSettings();
     if (langChanged) applyLocaleAndRebuild();
     setStatus(T("Settings.Saved"), StatusKind::Success);

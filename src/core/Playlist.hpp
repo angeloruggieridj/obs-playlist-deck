@@ -21,6 +21,10 @@ public:
     int size() const { return static_cast<int>(items_.size()); }
     bool empty() const { return items_.empty(); }
     int currentIndex() const { return current_; }
+    // Where playback picks up when nothing is current any more: the row that
+    // took the place of the item that was removed while it played. -1 when
+    // there is nothing to resume from.
+    int resumeIndex() const { return resume_; }
 
     const PlaylistItem* current() const {
         return (current_ >= 0 && current_ < size()) ? &items_[current_] : nullptr;
@@ -67,6 +71,7 @@ public:
 private:
     std::vector<PlaylistItem> items_;
     int current_ = -1;
+    int resume_ = -1;
 };
 
 } // namespace pld

@@ -101,6 +101,9 @@ public:
 
     // Program/preview changed: the trigger for a staged clip (see Staging.hpp).
     void programLayoutChanged();
+    // The program transition finished: the effect picked for an automatic scene
+    // switch is replaced by the one the operator had selected.
+    void transitionStopped();
 
     // Remote control entry points (invoked from the obs-websocket vendor API on
     // the websocket thread via queued connection — keep them invokable).
@@ -220,6 +223,10 @@ private:
     void snapshotStatus();
     void snapshotPlayback(); // just the volatile fields, for the twice-a-second tick
     void emitVendorItemStarted();
+    // Optional action at the end of an item: cut, fade or stinger to a chosen
+    // scene.
+    void runAutoSwitch();
+    void restoreTransition();
     // Tells remote clients the item list changed, so they re-read GetItems
     // instead of polling it. Call after the snapshot is up to date.
     void emitPlaylistChanged(const char* reason);
@@ -283,6 +290,9 @@ private:
     bool refreshing_ = false;        // true while refreshSources() repopulates the combo
     bool switchingPlaylist_ = false; // true while the library combo is repopulated
     bool stagePauseWanted_ = false;  // a staged clip must pause as soon as it opens
+    // Name of the transition OBS had selected before an automatic switch changed
+    // it; empty when nothing is waiting to be put back.
+    QString transitionToRestore_;
     int captureRow_ = -1;            // item whose duration the next media_started belongs to
     QString capturePath_;
     int captureRetries_ = 0;
