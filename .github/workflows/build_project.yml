@@ -828,8 +828,11 @@ jobs:
             echo "obs_version_changed=true" >> "$GITHUB_OUTPUT"
           fi
           version="$(python3 -c 'import json; m=json.load(open("obs-compat.json")); print(m["min_supported"] + " - " + m["max_tested"] + (" (beta " + m["beta_tested"] + ")" if m.get("beta_tested") else ""))')"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Recorded under the maintainer's identity, not the bot's: the commit
+          # is the maintainer's declaration, and a bot author would list
+          # github-actions as a contributor to the repository.
+          git config user.name "Angelo Ruggieri"
+          git config user.email "angeloruggieridj@gmail.com"
           git add obs-compat.json README.md .github/workflows/build_project.yml
           git commit -m "docs(compat): record OBS ${version}"
           git push
