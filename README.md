@@ -386,10 +386,9 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 <!-- obs-compat:start -->
 | | |
 |---|---|
-| **OBS Studio** | **30.0 – 32.2.2** |
+| **OBS Studio** | **30.0 – 33.0.0** |
 | **Verified by** | Compile and link against each version's OBS SDK in CI — not a runtime test. |
-| **Built against** | 32.2.2 |
-| **Also builds against** | 33.0.0-rc3 (prerelease, not supported) |
+| **Built against** | 33.0.0 |
 | **Platforms** | Windows x64, Linux x86_64 (Ubuntu 24.04 and 26.04), macOS universal (Intel + Apple Silicon) |
 | **Qt** | Qt 6 — on Windows and macOS, the exact Qt the targeted OBS ships |
 
@@ -406,19 +405,16 @@ or fix a translation, change `locales.json`, run the generator, and open a PR.
 | `32.0.0` | ✅ compiles and links | Ubuntu 24.04 |
 | `32.1.0` | ✅ compiles and links | Ubuntu 24.04 |
 | `32.2.0` | ✅ compiles and links | Ubuntu 24.04 |
-| `32.2.2` | ✅ compiles and links | Ubuntu 24.04 |
-| `33.0.0-rc3` | ✅ compiles and links | Ubuntu 26.04 (container) |
+| `33.0.0` | ✅ compiles and links | Ubuntu 26.04 (container) |
 
 Generated from [`obs-compat.json`](obs-compat.json) by `tools/obs_compat.py`.
 </details>
 <!-- obs-compat:end -->
 
-**OBS 33 is supported only partially, while it is in beta.** The newest OBS 33
-prerelease the plugin builds against is listed under "Also builds against" in the
-table above; CI checks that the Linux package resolves every library and symbol
-it needs inside OBS's own 33 beta package for Ubuntu 26.04. That is not the same
-as running a show on it: full compatibility will be tested again, and declared in
-that table, when OBS 33 is released to the public.
+**OBS 33.0.0 is supported.** CI compiles and links the plugin against its SDK on
+Ubuntu 26.04, and the Windows and macOS packages were run in OBS 33.0.0 (module
+loaded, dock working). On Windows this was also driven through obs-websocket,
+with durations read through OBS 33's FFmpeg 8.
 
 ## Building from source
 

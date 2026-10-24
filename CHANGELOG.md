@@ -9,6 +9,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **OBS 33.0.0 is declared supported: 30.0 – 33.0.0.** CI compiles and links
+  against the released 33.0.0 SDK (Ubuntu 26.04), and the Windows
+  and macOS packages were run in OBS 33.0.0 (the Windows one also driven through
+  obs-websocket). The releases are now
+  built against 33.0.0 (`OBS_VERSION`).
+
 - **A timed-out artifact upload is retried automatically.** After 1.4.1 a green
   macOS build failed in `actions/upload-artifact` with `ETIMEDOUT` and stayed
   red until rerun by hand. The retry workflow now also reruns the failed jobs

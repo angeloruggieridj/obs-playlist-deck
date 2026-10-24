@@ -1,12 +1,12 @@
 {
-  "beta_tested": "33.0.0-rc3",
+  "beta_tested": null,
   "floor": {
     "reason": "obs_frontend_add_dock_by_id() was introduced in OBS 30.0",
     "version": "30.0"
   },
   "gaps": [],
-  "generated": "2026-10-21",
-  "max_tested": "32.2.2",
+  "generated": "2026-10-24",
+  "max_tested": "33.0.0",
   "min_supported": "30.0",
   "results": {
     "30.0.0": {
@@ -49,12 +49,7 @@
       "phase": null,
       "status": "ok"
     },
-    "32.2.2": {
-      "env": "native",
-      "phase": null,
-      "status": "ok"
-    },
-    "33.0.0-rc3": {
+    "33.0.0": {
       "env": "resolute",
       "phase": null,
       "status": "ok"
