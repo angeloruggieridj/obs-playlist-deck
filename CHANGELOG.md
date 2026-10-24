@@ -26,6 +26,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   obs-websocket). The releases are now
   built against 33.0.0 (`OBS_VERSION`).
 
+- **The compatibility job can record an OBS version move again.** Its push
+  changes `OBS_VERSION` in the workflow file, which `GITHUB_TOKEN` is refused
+  ("without `workflows` permission"), so the job failed whenever OBS moved.
+  It now checks out and pushes over SSH with a deploy key of this repository
+  (secret `COMPAT_DEPLOY_KEY`). The Ubuntu 24.04 package stays built against
+  OBS 32.2.2, the last OBS that publishes a 24.04 package, and the Windows
+  build handles OBS 33's SDK.
+
 - **A timed-out artifact upload is retried automatically.** After 1.4.1 a green
   macOS build failed in `actions/upload-artifact` with `ETIMEDOUT` and stayed
   red until rerun by hand. The retry workflow now also reruns the failed jobs
