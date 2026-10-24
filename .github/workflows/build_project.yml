@@ -124,8 +124,12 @@ jobs:
       # first does not load into the OBS from the PPA or OBS's .deb. A missing
       # .deb (OBS 33 publishes none for 24.04) fails here, loudly, rather than
       # quietly building against something else.
-      - name: Install OBS ${{ env.OBS_VERSION }} and build deps
+      - name: Install OBS and build deps
         run: |
+          # OBS 33 publishes no .deb for Ubuntu 24.04, so the 24.04 package (for
+          # OBS 30-32) is built against the last OBS that does. A fixed pin, not
+          # generated: obs_compat.py moves OBS_VERSION, never this.
+          if [ "${{ matrix.ubuntu }}" = "24.04" ]; then OBS_VERSION="32.2.2"; fi
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates
           deb="OBS-Studio-${OBS_VERSION}-Ubuntu-${{ matrix.ubuntu }}-x86_64.deb"
@@ -200,6 +204,9 @@ jobs:
         run: |
           bash .github/scripts/linux-runtime-check.sh packages \
             "$OBS_VERSION" "${{ steps.versions.outputs.beta }}"
+          # OBS 33 has no Ubuntu 24.04 .deb, so the 24.04 package is also
+          # checked against the last OBS that ships one.
+          bash .github/scripts/linux-runtime-check.sh packages 32.2.2
 
   windows:
     name: Windows x64
@@ -276,6 +283,13 @@ jobs:
         run: |
           perl -pi -e 's/^(\s*)set_property\(GLOBAL APPEND PROPERTY OBS_FEATURES_DISABLED "Core Modules"\)\s*$/$&$1set_obs_core_modules()\n/' \
             "/c/obs-studio-${OBS_VERSION}/plugins/CMakeLists.txt"
+          # OBS 33's Windows helper calls add_dependencies(obs-studio <execs>
+          # <mods>), which errors when both lists are empty -- as they are here,
+          # with every module off and only obs-frontend-api built. The same
+          # guard the compat probe applies on Linux; no match, no change, on
+          # versions without the call.
+          sed -i 's|add_dependencies(${target} ${obs_executables} ${obs_modules})|if(obs_executables OR obs_modules)\n      add_dependencies(${target} ${obs_executables} ${obs_modules})\n    endif()|' \
+            "/c/obs-studio-${OBS_VERSION}/cmake/windows/helpers.cmake"
       - name: Configure OBS
         if: steps.cache-obsdev.outputs.cache-hit != 'true'
         shell: cmd
