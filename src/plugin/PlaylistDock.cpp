@@ -31,6 +31,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDirIterator>
+#include <QDesktopServices>
 #include <QDockWidget>
 #include <QEvent>
 #include <QFile>
@@ -63,6 +64,7 @@
 #include <QStyledItemDelegate>
 #include <QSvgRenderer>
 #include <QTimer>
+#include <QUrl>
 #include <QVariant>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -391,6 +393,14 @@ void PlaylistDock::changeEvent(QEvent* event) {
     }
 }
 
+bool PlaylistDock::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == updateLink_ && event->type() == QEvent::MouseButtonRelease) {
+        QDesktopServices::openUrl(QUrl(QString::fromUtf8(kReleasesUrl)));
+        return true;
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void PlaylistDock::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     // The 500 ms tick used to run for the entire OBS session even with the dock
@@ -622,15 +632,35 @@ void PlaylistDock::buildUi() {
     status_ = status;
     col->addWidget(status_);
 
+    // The version is a plain, fixed-width label. It used to be a rich-text label
+    // that also carried the "update to vX.Y.Z" link: a QLabel's minimum width is
+    // the width of its whole text, so once an update was announced the label
+    // refused to be narrower than "v1.4.0 - update to v1.4.1 (arrow)" and spilled
+    // out of the dock over its neighbours (and held the OBS window wider than the
+    // screen). The link is its own label now, which shortens instead.
     versionLabel_ = new QLabel(QStringLiteral("v%1").arg(PLD_VERSION));
     versionLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    versionLabel_->setTextFormat(Qt::RichText);
-    versionLabel_->setOpenExternalLinks(true);
+    versionLabel_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     versionLabel_->setToolTip(T("Tip.Version"));
+    auto* updateLink = new ElidedLabel();
+    updateLink->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    updateLink->setAutoToolTip(true);
+    updateLink->setCursor(Qt::PointingHandCursor);
+    QPalette linkPal = updateLink->palette();
+    linkPal.setColor(QPalette::WindowText, palette().color(QPalette::Link));
+    updateLink->setPalette(linkPal);
+    QFont linkFont = updateLink->font();
+    linkFont.setUnderline(true);
+    updateLink->setFont(linkFont);
+    updateLink->installEventFilter(this);
+    updateLink_ = updateLink;
+    updateLink_->setVisible(!updateText_.isEmpty());
+    updateLink_->setText(updateText_);
     auto* settingsBtn = mk(":/icons/settings.svg", T("Btn.Settings"), T("Tip.Settings"));
     auto* verRow = new QHBoxLayout();
+    verRow->setSpacing(6);
     verRow->addWidget(settingsBtn);
-    verRow->addStretch(1);
+    verRow->addWidget(updateLink_, 1);
     verRow->addWidget(versionLabel_);
     col->addLayout(verRow);
 
@@ -2335,10 +2365,9 @@ void PlaylistDock::onUpdateResult(const QString& body, const QString& error, boo
         // "a" plus two invisible controls), not the three UTF-8 bytes of one
         // arrow. "↗" is transcoded by the compiler and is correct on every
         // platform and toolchain.
-        versionLabel_->setText(QStringLiteral("v%1 \u2014 <a href=\"%2\">%3 \u2197</a>")
-                                   .arg(PLD_VERSION)
-                                   .arg(QString::fromUtf8(kReleasesUrl))
-                                   .arg(T("Link.UpdateTo").arg(tag.toHtmlEscaped())));
+        updateText_ = QStringLiteral("%1 \u2197").arg(T("Link.UpdateTo").arg(tag));
+        updateLink_->setText(updateText_);
+        updateLink_->setVisible(true);
         setStatus(T("Status.UpdateAvailable").arg(tag), StatusKind::Info);
     } else if (manual) {
         setStatus(T("Status.UpToDate").arg(PLD_VERSION), StatusKind::Success);

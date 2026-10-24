@@ -7,6 +7,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **The version number no longer spills out of its box.** The version and the
+  "update to vX.Y.Z" link were one rich-text label, and a QLabel cannot be
+  narrower than its text: once an update was announced the label held the dock
+  open at the width of the whole sentence and was drawn over the neighbouring
+  docks. The version is now a fixed-width label and the link a separate label
+  that shortens with an ellipsis (full text in the tooltip, click opens the
+  releases page). It may also have been what kept the OBS window from fitting
+  the screen in full screen on macOS; that is not confirmed.
+
 ### Changed
 
 - **OBS 33.0.0 is declared supported: 30.0 – 33.0.0.** CI compiles and links

@@ -638,3 +638,26 @@ TEST_CASE("scenes are picked from the live list, and the automatic switch is opt
     CHECK(readSource("src/plugin/plugin-main.cpp").find("transitionStopped()") !=
           std::string::npos);
 }
+
+// 1.4.2: the version label spilled out of the dock once an update was announced.
+// A QLabel's minimum width is that of its whole text, and the label carried
+// "vX - update to vY" as rich text, so it could not be narrower than that.
+TEST_CASE("the version is a fixed label and the update link elides on its own") {
+    const std::string dock = readSource("src/plugin/PlaylistDock.cpp");
+    REQUIRE_FALSE(dock.empty());
+
+    const std::string build = bodyOf(dock, "void PlaylistDock::buildUi()");
+    REQUIRE_FALSE(build.empty());
+    // The version never changes width...
+    CHECK(build.find("versionLabel_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed)") !=
+          std::string::npos);
+    // ...and the link is a separate label that shortens.
+    CHECK(build.find("auto* updateLink = new ElidedLabel()") != std::string::npos);
+    CHECK(build.find("verRow->addWidget(updateLink_, 1)") != std::string::npos);
+
+    // The announcement no longer touches the version label.
+    const std::string result = bodyOf(dock, "void PlaylistDock::onUpdateResult");
+    REQUIRE_FALSE(result.empty());
+    CHECK(result.find("versionLabel_") == std::string::npos);
+    CHECK(result.find("updateLink_->setText(") != std::string::npos);
+}

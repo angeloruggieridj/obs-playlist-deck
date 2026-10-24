@@ -187,6 +187,7 @@ protected:
     // Theme switches (OBS 31 can change theme while running) and the dock being
     // shown or hidden both arrive here.
     void changeEvent(QEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
 
@@ -326,6 +327,8 @@ private:
     QLabel* loadedLabel_ = nullptr;
     QLabel* status_ = nullptr;
     QLabel* versionLabel_ = nullptr;
+    QLabel* updateLink_ = nullptr;
+    QString updateText_; // "update to vX.Y.Z"; kept so a language rebuild does not lose it
     QPushButton* playPauseBtn_ = nullptr;
     QPushButton* muteBtn_ = nullptr;
     int lastTransportState_ = -1; // 1 playing, 0 not, -1 unknown: skip identical repaints

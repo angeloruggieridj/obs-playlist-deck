@@ -129,8 +129,11 @@ TEST_CASE("the update link text is localized in every locale") {
     REQUIRE_FALSE(dock.empty());
     CHECK(dock.find("Link.UpdateTo") != std::string::npos);
     CHECK(dock.find("update to %3") == std::string::npos);
-    // The release tag comes from GitHub and lands in a rich-text label.
-    CHECK(dock.find("toHtmlEscaped()") != std::string::npos);
+    // The release tag comes from GitHub, so it must never land in a rich-text
+    // label unescaped. The link is a plain-text label, which needs no escaping:
+    // nothing in it is parsed as markup.
+    CHECK(dock.find("updateLink_->setText(") != std::string::npos);
+    CHECK(dock.find("setTextFormat(Qt::RichText)") == std::string::npos);
 
     for (const auto& loc : shippedLocales()) {
         const std::string ini = readSource(("data/locale/" + loc + ".ini").c_str());
