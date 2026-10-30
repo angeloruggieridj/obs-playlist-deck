@@ -5,8 +5,8 @@
     "version": "30.0"
   },
   "gaps": [],
-  "generated": "2026-10-24",
-  "max_tested": "33.0.0",
+  "generated": "2026-10-30",
+  "max_tested": "33.0.1",
   "min_supported": "30.0",
   "results": {
     "30.0.0": {
@@ -50,6 +50,11 @@
       "status": "ok"
     },
     "33.0.0": {
+      "env": "resolute",
+      "phase": null,
+      "status": "ok"
+    },
+    "33.0.1": {
       "env": "resolute",
       "phase": null,
       "status": "ok"
