@@ -44,6 +44,10 @@ public:
     }
     void stop() override { ++stops; }
     bool inProgram() const override { return onAir; }
+    // What OBS's media state says at the moment an end is handled: true while
+    // the source holds a clip that has not finished.
+    bool unfinished = false;
+    bool showingUnfinishedClip() const override { return unfinished; }
 
     void reportStarted() {
         if (autoStart && engine) engine->mediaStarted();
@@ -107,7 +111,9 @@ TEST_CASE("end of clip: play next advances, and stops at the end of the list") {
     CHECK(f.engine.mediaEnded().index == 2);
     const auto atEnd = f.engine.mediaEnded();
     CHECK(atEnd.outcome == PlaybackOutcome::Stopped);
-    CHECK(f.transport.stops == 1);
+    // The clip has already ended; stopping the source would clear it to black
+    // instead of leaving the last frame on screen.
+    CHECK(f.transport.stops == 0);
 }
 
 TEST_CASE("end of clip: loop wraps around") {
@@ -374,6 +380,38 @@ TEST_CASE("a source that never reports a start costs one advance, not the deck")
     CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
     // The next one is honoured, so auto-advance cannot wedge for good.
     CHECK(f.engine.mediaEnded().index == 1);
+}
+
+// The handshake assumes "outgoing end, then start". OBS can also report the
+// start first, or two ends; the source's own state tells them apart.
+TEST_CASE("an end that arrives after the new clip's start is not acted on") {
+    Fixture f(4);
+    f.engine.setMode(EndMode::LoadNext);
+    f.engine.play(0);
+    f.transport.onAir = false;
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Staged); // clip 1 staged
+    f.engine.mediaStarted();       // the start came first...
+    f.transport.unfinished = true; // ...so the source holds clip 1, paused
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
+    CHECK(f.playlist.currentIndex() == 1);
+    CHECK(f.transport.staged.size() == 1);
+}
+
+TEST_CASE("two ends for one reload do not advance the playlist") {
+    Fixture f(4);
+    f.transport.autoStart = false;
+    f.engine.setMode(EndMode::PlayNext);
+    f.engine.play(0);
+    f.engine.mediaStarted();
+    CHECK(f.engine.mediaEnded().index == 1);
+    f.transport.unfinished = true; // clip 1 is loading
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
+    CHECK(f.playlist.currentIndex() == 1);
+    // Once clip 1 has really finished, its end advances by exactly one.
+    f.engine.mediaStarted();
+    f.transport.unfinished = false;
+    CHECK(f.engine.mediaEnded().index == 2);
 }
 
 TEST_CASE("an explicit request is never blocked by the guard") {

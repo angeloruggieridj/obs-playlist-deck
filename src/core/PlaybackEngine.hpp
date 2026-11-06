@@ -28,6 +28,12 @@ public:
     virtual void stop() = 0;
     // Whether the bound source is part of the scene currently on air.
     virtual bool inProgram() const = 0;
+    // Whether the source is, right now, opening, playing or holding paused a
+    // clip that has not finished. An end reported in that state cannot belong
+    // to that clip: it is the outgoing clip's, arriving late. Unlike the
+    // started/ended handshake this does not depend on the order OBS delivers
+    // its signals in.
+    virtual bool showingUnfinishedClip() const { return false; }
 };
 
 enum class PlaybackOutcome {

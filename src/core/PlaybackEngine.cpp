@@ -94,6 +94,11 @@ PlaybackResult PlaybackEngine::mediaEnded() {
         awaitingStart_ = false;
         return {};
     }
+    // The handshake above only covers the order "outgoing end, then start", and
+    // only one end. OBS may also report a start first, or two ends (one for the
+    // file update, one for the restart); either way the source is by then
+    // showing the new clip, unfinished. A real end finds it at its end.
+    if (transport_.showingUnfinishedClip()) return {};
     // Nothing is current - the playing item was removed, or the deck was
     // stopped - so there is no clip for this end to belong to. Acting on it used
     // to start the list from the top: removing the clip that was on air made
@@ -119,7 +124,9 @@ PlaybackResult PlaybackEngine::mediaEnded() {
         return {PlaybackOutcome::StagePending, decision.index};
     }
     case EndAction::Stop:
-        transport_.stop();
+        // No stop() here: the clip has already ended, and stopping the source
+        // closes it, which clears the picture to black. Left alone it holds
+        // its last frame.
         return {PlaybackOutcome::Stopped, -1};
     case EndAction::Nothing:
         break;

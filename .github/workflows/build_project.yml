@@ -55,6 +55,10 @@ env:
   # This one value feeds both cmake invocations and LSMinimumSystemVersion, so
   # the binary and the manifest cannot disagree again.
   MACOS_DEPLOYMENT_TARGET: "13.0"
+  # Playback event tracing in OBS's log: on for every build except a release.
+  # A tag (v*) builds the shipped packages, which log normally; anything else is
+  # a test build and logs each media_started / media_ended with the source state.
+  PLD_TRACE_LOG: ${{ startsWith(github.ref, 'refs/tags/') && 'OFF' || 'ON' }}
 
 jobs:
   tests:
@@ -141,7 +145,8 @@ jobs:
       - name: Configure
         run: |
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTS=OFF -DCMAKE_PREFIX_PATH="/usr/local;/usr"
+            -DBUILD_TESTS=OFF -DPLD_TRACE_LOG="$PLD_TRACE_LOG" \
+            -DCMAKE_PREFIX_PATH="/usr/local;/usr"
       - name: Build
         run: cmake --build build
       - name: Links against OBS's libobs
@@ -318,6 +323,7 @@ jobs:
           cmake -B build -S . -A x64 ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DBUILD_TESTS=OFF ^
+            -DPLD_TRACE_LOG=%PLD_TRACE_LOG% ^
             -DPLD_EXPECTED_QT=%OBS_QT_ABI% ^
             -DCMAKE_PREFIX_PATH="C:\obs-dev;%Qt6_DIR%;C:\obs-deps"
       - name: Build plugin
@@ -487,6 +493,7 @@ jobs:
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTS=OFF \
+            -DPLD_TRACE_LOG="$PLD_TRACE_LOG" \
             -DPLD_EXPECTED_QT="$OBS_QT_ABI" \
             -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET="${{ env.MACOS_DEPLOYMENT_TARGET }}" \

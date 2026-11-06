@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "MediaSourceController.hpp"
 
+#include <cstdlib>
 #include <obs-frontend-api.h>
+#include <util/base.h>
 
 using pld::SourceKind;
 
@@ -125,6 +127,9 @@ bool MediaSourceController::writeFile(const std::string& path) {
     case SourceKind::Ffmpeg:
         obs_data_set_bool(settings, "is_local_file", true);
         obs_data_set_string(settings, "local_file", path.c_str());
+        // "Show nothing when playback ends" is on by default and blanks the
+        // source after the last clip. The deck wants the final frame to stay.
+        obs_data_set_bool(settings, "clear_on_media_end", false);
         break;
     case SourceKind::Vlc: {
         obs_data_array_t* arr = obs_data_array_create();
@@ -278,14 +283,54 @@ bool MediaSourceController::isInProgram() const {
     return found;
 }
 
+bool MediaSourceController::showingUnfinishedClip() const {
+    if (!source_) return false;
+    switch (obs_source_media_get_state(source_)) {
+    case OBS_MEDIA_STATE_OPENING:
+    case OBS_MEDIA_STATE_BUFFERING:
+    case OBS_MEDIA_STATE_PLAYING:
+    case OBS_MEDIA_STATE_PAUSED:
+        return true;
+    default:
+        return false; // none, stopped, ended, error
+    }
+}
+
+// Diagnostics: every media_started / media_ended is logged with the source state
+// at that moment, which is how the order OBS delivers them in (and so whether the
+// end-of-clip guard holds) can be read off a real session. On by default in test
+// builds (PLD_TRACE_DEFAULT, see CMakeLists), off in the release build;
+// PLD_TRACE_EVENTS=1/0 in OBS's environment overrides either.
+#ifdef PLD_TRACE_DEFAULT
+static constexpr bool kTraceDefault = true;
+#else
+static constexpr bool kTraceDefault = false;
+#endif
+
+static void traceMediaEvent(const char* what, obs_source_t* source) {
+    static const bool enabled = [] {
+        const char* v = std::getenv("PLD_TRACE_EVENTS");
+        if (v && *v) return *v != '0';
+        return kTraceDefault;
+    }();
+    if (!enabled || !source) return;
+    blog(LOG_INFO, "[obs-playlist-deck] trace %s state=%d time=%lld ms", what,
+         static_cast<int>(obs_source_media_get_state(source)),
+         static_cast<long long>(obs_source_media_get_time(source)));
+}
+
 void MediaSourceController::mediaEndedThunk(void* data, calldata_t*) {
     auto* self = static_cast<MediaSourceController*>(data);
-    if (self && self->onEnded_) self->onEnded_();
+    if (!self) return;
+    traceMediaEvent("media_ended", self->source_);
+    if (self->onEnded_) self->onEnded_();
 }
 
 void MediaSourceController::mediaStartedThunk(void* data, calldata_t*) {
     auto* self = static_cast<MediaSourceController*>(data);
-    if (self && self->onStarted_) self->onStarted_();
+    if (!self) return;
+    traceMediaEvent("media_started", self->source_);
+    if (self->onStarted_) self->onStarted_();
 }
 
 void MediaSourceController::muteThunk(void* data, calldata_t* cd) {

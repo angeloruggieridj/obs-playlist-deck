@@ -66,6 +66,15 @@ endif()
 
 target_compile_definitions(obs-playlist-deck PRIVATE PLD_VERSION="${PROJECT_VERSION}")
 
+# Playback event tracing in OBS's log (every media_started / media_ended with the
+# source state). ON while a build is being tested; the release build passes
+# -DPLD_TRACE_LOG=OFF. Either way the PLD_TRACE_EVENTS environment variable
+# overrides it at run time (1 = on, 0 = off).
+option(PLD_TRACE_LOG "Log playback events by default (test builds)" ON)
+if(PLD_TRACE_LOG)
+  target_compile_definitions(obs-playlist-deck PRIVATE PLD_TRACE_DEFAULT=1)
+endif()
+
 target_include_directories(obs-playlist-deck PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_SOURCE_DIR}/src/core

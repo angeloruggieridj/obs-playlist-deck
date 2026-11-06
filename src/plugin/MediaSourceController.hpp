@@ -45,6 +45,7 @@ public:
     bool stageFile(const std::string& path) override { return setFileLoadOnly(path); }
     void stop() override;
     bool inProgram() const override { return isInProgram(); }
+    bool showingUnfinishedClip() const override;
 
     bool setFileAndRestart(const std::string& path);
     bool setFileLoadOnly(const std::string& path); // set file, then pause on first frame

@@ -9,6 +9,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Auto-advance could still skip an item.** The guard against the end the
+  source reports for the *outgoing* clip assumed OBS delivers "end, then start"
+  and only one end. With *Load next (paused)* on a Media Source the reload
+  (file update, restart, pause) can report a start first, or two ends, and the
+  extra end advanced the list again, so the staged item was replaced before it
+  was ever shown. An end is now ignored whenever the source is, at that moment,
+  opening, playing or paused on a clip that has not finished, whatever the order
+  of the signals. Test builds log every `media_started` / `media_ended` with the
+  source state (`-DPLD_TRACE_LOG=ON`, the default; the release build uses
+  `OFF`); `PLD_TRACE_EVENTS=1/0` in OBS's environment overrides it.
+- **The last clip of the list ended on a black screen.** Two causes: the Media
+  Source's "Show nothing when playback ends" (on by default) blanks it, and the
+  deck stopped the source after the last item, which closes it. The deck now
+  turns that option off on the source it drives and no longer stops a clip that
+  has already finished, so the final frame stays on screen.
 - **The version number no longer spills out of its box.** The version and the
   "update to vX.Y.Z" link were one rich-text label, and a QLabel cannot be
   narrower than its text: once an update was announced the label held the dock
