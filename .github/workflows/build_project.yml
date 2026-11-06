@@ -40,7 +40,7 @@ permissions:
 # next build. The comment is what keeps the pin readable and updatable.
 
 env:
-  OBS_VERSION: "33.0.0"
+  OBS_VERSION: "33.0.1"
   # There is deliberately no OBS_DEPS_VERSION or Qt version here any more. The
   # Windows and macOS jobs read both from OBS_VERSION's own CMakePresets.json
   # (tools/obs_deps.py): typed in by hand they had drifted to a Qt and an
