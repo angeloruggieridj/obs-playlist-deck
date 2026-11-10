@@ -261,7 +261,9 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
             ./debs/*.deb xvfb ffmpeg libgl1-mesa-dri libglx-mesa0 python3-pip
           sudo ldconfig
-          python3 -m pip install --break-system-packages websocket-client pillow
+          # System-wide: the run script gives OBS a throwaway $HOME, which would
+          # hide a per-user install.
+          sudo python3 -m pip install --break-system-packages websocket-client pillow
       - name: Run the checks
         run: |
           if [ -n "${{ matrix.release }}" ]; then
