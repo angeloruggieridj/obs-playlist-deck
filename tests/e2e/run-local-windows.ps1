@@ -12,6 +12,7 @@ param(
     [Parameter(Mandatory)] [string] $Plugin,
     [Parameter(Mandatory)] [string] $Label,
     [string] $Python = "python",
+    [double] $ClipSeconds = 3,
     [string] $ObsDir = "C:\Program Files\obs-studio"
 )
 $ErrorActionPreference = "Stop"
@@ -28,9 +29,9 @@ New-Item -ItemType Directory -Force $clips, "$cfg\basic\profiles\E2E", "$cfg\bas
     "$cfg\plugins" | Out-Null
 
 function New-Clip($name, $color) {
-    $f = Join-Path $clips "$name.mp4"
+    $f = Join-Path $clips "$name-$ClipSeconds.mp4"
     if (-not (Test-Path $f)) {
-        ffmpeg -loglevel error -y -f lavfi -i "color=c=${color}:s=320x180:r=25:d=3" `
+        ffmpeg -loglevel error -y -f lavfi -i "color=c=${color}:s=320x180:r=25:d=${ClipSeconds}" `
             -c:v libx264 -pix_fmt yuv420p -an $f
     }
     $f
@@ -124,7 +125,7 @@ except Exception:
     }
     if (-not $ready) { Write-Host "OBS or the deck did not come up"; }
     else {
-        & $Python (Join-Path $here "obs_e2e.py") --label $Label --json $results --clips $c0 $c1 $c2
+        & $Python (Join-Path $here "obs_e2e.py") --label $Label --json $results --clip-seconds $ClipSeconds --clips $c0 $c1 $c2
         $status = $LASTEXITCODE
     }
 } finally {

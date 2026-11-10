@@ -34,9 +34,10 @@ VENDOR = "obs-playlist-deck"
 MODE_PLAY_NEXT = 0
 MODE_LOAD_NEXT = 2
 
+# Length of the test clips; set from --clip-seconds. A clip that really played to
+# its end is current for about this long. One that was skipped is current for a
+# moment, so anything over MIN_DWELL counts as played.
 CLIP_SECONDS = 3.0
-# A clip that really played to its end is current for about CLIP_SECONDS. One
-# that was skipped is current for a moment. Anything over this counts as played.
 MIN_DWELL = CLIP_SECONDS * 0.6
 
 
@@ -219,8 +220,13 @@ def main():
     ap.add_argument("--url", default="ws://127.0.0.1:4455")
     ap.add_argument("--clips", nargs=3, required=True, help="three media files, in order")
     ap.add_argument("--label", default="plugin")
+    ap.add_argument("--clip-seconds", type=float, default=3.0,
+                    help="length of the three clips (they must really be this long)")
     ap.add_argument("--json", help="write the results here")
     args = ap.parse_args()
+    global CLIP_SECONDS, MIN_DWELL
+    CLIP_SECONDS = args.clip_seconds
+    MIN_DWELL = CLIP_SECONDS * 0.6
 
     obs = Obs(args.url)
     version = obs.status().get("pluginVersion", "?")
