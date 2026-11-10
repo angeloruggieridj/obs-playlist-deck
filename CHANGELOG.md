@@ -9,11 +9,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **End-to-end checks inside a real OBS.** CI now starts OBS headless, loads the
-  plugin and drives it through obs-websocket (`tests/e2e`): no item is skipped
-  on auto-advance (plain and *Load next (paused)*), and the last frame stays on
-  screen at the end of the list. The same checks run against the previous
-  release as a baseline, to show they can fail.
+- **End-to-end checks inside a real OBS.** `tests/e2e` starts a portable copy of
+  the installed OBS, loads a plugin build and drives it through obs-websocket
+  (`tests/e2e/run-local-windows.ps1`): no item is skipped on auto-advance (plain
+  and *Load next (paused)*), and the last frame stays on screen at the end of the
+  list. Run against two builds it shows whether a fix works. Local only; CI does
+  not run it.
 
 ### Fixed
 
