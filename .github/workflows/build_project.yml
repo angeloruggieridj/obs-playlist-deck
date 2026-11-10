@@ -213,6 +213,76 @@ jobs:
           # checked against the last OBS that ships one.
           bash .github/scripts/linux-runtime-check.sh packages 32.2.2
 
+  # Drives the plugin inside a real OBS (headless, under Xvfb) through
+  # obs-websocket and checks what it does: no item skipped on auto-advance, and
+  # the last frame left on screen at the end of the list. See tests/e2e.
+  #
+  # It runs twice. "candidate" is the package this run just built and must pass.
+  # "baseline" is the release already in users' hands: it is there to show the
+  # checks can fail (a check that passes on the old build proves nothing), so its
+  # result is reported but never fails the run.
+  e2e:
+    name: End-to-end in OBS (${{ matrix.name }})
+    needs: linux
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.informational }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: candidate
+            informational: false
+          - name: baseline v1.4.1
+            informational: true
+            release: v1.4.1
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: packages
+          pattern: obs-playlist-deck-linux-ubuntu-24.04
+          merge-multiple: true
+      - name: Fetch the baseline release
+        if: matrix.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ matrix.release }}" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz' \
+            --dir baseline
+      - name: Install OBS, Xvfb and ffmpeg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # OBS 33 has no Ubuntu 24.04 .deb; 32.2.2 is the last that does.
+          gh release download 32.2.2 --repo obsproject/obs-studio \
+            --pattern 'OBS-Studio-*-Ubuntu-24.04-x86_64.deb' --dir debs
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            ./debs/*.deb xvfb ffmpeg libgl1-mesa-dri libglx-mesa0 python3-pip
+          sudo ldconfig
+          python3 -m pip install --break-system-packages websocket-client pillow
+      - name: Run the checks
+        run: |
+          if [ -n "${{ matrix.release }}" ]; then
+            package="baseline/obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz"
+          else
+            package="packages/obs-playlist-deck-linux-ubuntu-24.04-x86_64.tar.gz"
+          fi
+          bash .github/scripts/e2e-run.sh "$package" "${{ matrix.name }}" e2e-out
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f e2e-out/results.json ]; then
+            python3 tests/e2e/summary.py e2e-out/results.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: e2e-${{ matrix.release && 'baseline' || 'candidate' }}
+          path: e2e-out
+          if-no-files-found: ignore
+
   windows:
     name: Windows x64
     needs: tests
