@@ -7,6 +7,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.4.2] — 2026-11-10
+
+Auto-advance no longer skips an item with *Load next (paused)*, and the last
+clip of a list now stays on screen instead of going black. Both were reproduced
+on the 1.4.1 package in OBS 33.0.1 and are gone in this one. The compatibility is
+unchanged: **OBS 30.0 – 33.0.1**.
+
 ### Added
 
 - **End-to-end checks inside a real OBS.** `tests/e2e` starts a portable copy of
@@ -18,21 +25,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **Auto-advance could still skip an item.** The guard against the end the
-  source reports for the *outgoing* clip assumed OBS delivers "end, then start"
-  and only one end. With *Load next (paused)* on a Media Source the reload
-  (file update, restart, pause) can report a start first, or two ends, and the
-  extra end advanced the list again, so the staged item was replaced before it
-  was ever shown. An end is now ignored whenever the source is, at that moment,
-  opening, playing or paused on a clip that has not finished, whatever the order
-  of the signals. Test builds log every `media_started` / `media_ended` with the
-  source state (`-DPLD_TRACE_LOG=ON`, the default; the release build uses
-  `OFF`); `PLD_TRACE_EVENTS=1/0` in OBS's environment overrides it.
+- **Auto-advance still skipped an item with *Load next (paused)*.** Reproduced
+  on 1.4.1 with the Media Source: when the deck loads the queued clip, OBS
+  reports two starts and then, a third of a second later, the end of the clip
+  that was just replaced - and that late signal also rewrites the source's state
+  to "ended". The deck took it for the new clip's own end and queued the item
+  after it, so the item that should have been shown was replaced before anyone
+  saw it. The 1.3.1 guard (ignore the first end after a reload) could not catch
+  it: the starts had already arrived, and the state could not be trusted. An end
+  that comes within 1.5 s of handing the source a file is now ignored - half the
+  clip's length for a clip shorter than that, so a short sting still advances.
+  An end that arrives while the source holds an unfinished clip is ignored too.
+  Checked in OBS 33.0.1 with 3 s and 1.2 s clips, plain and *Load next
+  (paused)*.
 - **The last clip of the list ended on a black screen.** Two causes: the Media
   Source's "Show nothing when playback ends" (on by default) blanks it, and the
   deck stopped the source after the last item, which closes it. The deck now
   turns that option off on the source it drives and no longer stops a clip that
-  has already finished, so the final frame stays on screen.
+  has already finished, so the final frame stays on screen. A VLC source is not
+  changed by this.
 - **The version number no longer spills out of its box.** The version and the
   "update to vX.Y.Z" link were one rich-text label, and a QLabel cannot be
   narrower than its text: once an update was announced the label held the dock
@@ -44,11 +55,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **OBS 33.0.0 is declared supported: 30.0 – 33.0.0.** CI compiles and links
-  against the released 33.0.0 SDK (Ubuntu 26.04), and the Windows
+- **OBS 33 is declared supported: 30.0 – 33.0.1.** CI compiles and links
+  against the released 33.0.0 and 33.0.1 SDKs (Ubuntu 26.04), and the Windows
   and macOS packages were run in OBS 33.0.0 (the Windows one also driven through
-  obs-websocket). The releases are now
-  built against 33.0.0 (`OBS_VERSION`).
+  obs-websocket and, for this release, run in OBS 33.0.1). The releases are now
+  built against 33.0.1 (`OBS_VERSION`).
 
 - **The compatibility job can record an OBS version move again.** Its push
   changes `OBS_VERSION` in the workflow file, which `GITHUB_TOKEN` is refused
@@ -891,7 +902,8 @@ files and drives an existing OBS media source from it — transport controls,
 end-of-clip modes, save/open playlists as JSON or M3U, global OBS hotkeys, and a
 built-in update check.
 
-[Unreleased]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.4...v1.4.0
 [1.3.4]: https://github.com/angeloruggieridj/obs-playlist-deck/compare/v1.3.3...v1.3.4
