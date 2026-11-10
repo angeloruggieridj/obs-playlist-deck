@@ -16,9 +16,11 @@ mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 
-# A throwaway HOME, so nothing of a previous run (or of the runner) leaks in,
-# and the plugin is installed exactly as the README says: extracted into $HOME.
-export HOME="$(mktemp -d)"
+# The real HOME, not a temporary one: OBS takes its config folder from the
+# account database, not from $HOME, so a throwaway HOME is simply not looked at.
+# The CI runner is a fresh machine per job, so nothing leaks between runs. The
+# plugin is installed exactly as the README says: extracted into $HOME.
+: "${HOME:?}"
 tar -xzf "$package" -C "$HOME"
 
 cfg="$HOME/.config/obs-studio"
