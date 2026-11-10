@@ -63,7 +63,13 @@ struct Fixture {
     std::mt19937 rng{1234};
     PlaybackEngine engine{playlist, transport, rng};
 
+    // Time as the engine sees it. By default every look at the clock is five
+    // seconds after the last, so a clip is never "just handed over" when its end
+    // arrives; the tests about the stale-end window set the clock themselves.
+    long long clockMs = 0;
+
     explicit Fixture(int count = 3) {
+        engine.setClock([this]() { return clockMs += 5000; });
         transport.engine = &engine;
         for (int i = 0; i < count; ++i) {
             const std::string name = "clip" + std::to_string(i);
@@ -411,6 +417,46 @@ TEST_CASE("two ends for one reload do not advance the playlist") {
     // Once clip 1 has really finished, its end advances by exactly one.
     f.engine.mediaStarted();
     f.transport.unfinished = false;
+    CHECK(f.engine.mediaEnded().index == 2);
+}
+
+// Measured in OBS 33, "Load next (paused)", Media Source: the reload reports two
+// starts and then, 0.3-0.4 s later, the outgoing clip's end - which has also
+// rewritten the source's state to "ended". Neither the handshake nor the state
+// sees it; only the time since the file was handed over does.
+TEST_CASE("an outgoing end arriving after the starts is dropped by time") {
+    Fixture f(4);
+    long long t = 0;
+    f.engine.setClock([&t]() { return t; });
+    f.engine.setMode(EndMode::LoadNext);
+    f.engine.play(0);
+    t = 3000; // clip 0 plays out
+    f.transport.onAir = false;
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Staged); // clip 1 staged at 3000
+    // The source's own account: started twice, and unfinished state is gone.
+    f.engine.mediaStarted();
+    f.transport.unfinished = false;
+    t = 3390; // 0.39 s after the reload
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::Nothing);
+    CHECK(f.playlist.currentIndex() == 1);
+    CHECK(f.transport.staged.size() == 1);
+    // Clip 1 is played by the operator and ends on its own, much later.
+    t = 3000 + 3000 + 1600;
+    f.transport.onAir = true;
+    CHECK(f.engine.mediaEnded().outcome == PlaybackOutcome::StagePending);
+    CHECK(f.engine.pendingStageRow() == 2);
+}
+
+TEST_CASE("a clip shorter than the window still gets its own end honoured") {
+    Fixture f(3);
+    long long t = 0;
+    f.engine.setClock([&t]() { return t; });
+    f.engine.setMode(EndMode::PlayNext);
+    auto items = f.playlist.items();
+    items[1].durationMs = 400; // a 0.4 s sting
+    f.playlist.setItems(std::move(items));
+    f.engine.play(1);
+    t = 300; // past half its length (200), so no longer "just handed over"
     CHECK(f.engine.mediaEnded().index == 2);
 }
 

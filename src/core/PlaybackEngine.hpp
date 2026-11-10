@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
+#include <functional>
 #include <random>
 #include <string>
 #include "EndMode.hpp"
@@ -76,6 +77,15 @@ public:
     // The bound source reported that the clip finished.
     PlaybackResult mediaEnded();
 
+    // How long after a file is handed to the source an end is still taken for
+    // the outgoing clip's. Measured in OBS 33: the Media Source reports that end
+    // 0.3-0.4 s after the reload, *after* the new clip's started signals, and the
+    // late signal also overwrites the source's state with "ended", so neither the
+    // handshake nor the state can be trusted for it. Only time can.
+    static constexpr long long kStaleEndWindowMs = 1500;
+    // Replaceable so the tests can move time without sleeping.
+    void setClock(std::function<long long()> nowMs) { nowMs_ = std::move(nowMs); }
+
     // Program or preview changed: a clip staged behind "Load next (paused)" is
     // loaded as soon as the source is no longer on air.
     PlaybackResult programLayoutChanged();
@@ -125,6 +135,13 @@ private:
     // True from the moment a file is handed to the source until that source
     // says it started playing it.
     bool awaitingStart_ = false;
+    // When the source was last handed a file (-1: never), on the nowMs_ clock.
+    long long handoverMs_ = -1;
+    std::function<long long()> nowMs_;
+    long long now() const;
+    // True while an end is still inside the window in which it is the outgoing
+    // clip's.
+    bool endIsStale() const;
 };
 
 } // namespace pld

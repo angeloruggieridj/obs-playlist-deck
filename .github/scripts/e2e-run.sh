@@ -47,6 +47,8 @@ ProfileDir=E2E
 SceneCollection=E2E
 SceneCollectionFile=E2E
 EOF
+# OBS 31+ keeps the chosen profile and scene collection in user.ini.
+cp "$cfg/global.ini" "$cfg/user.ini"
 cat > "$cfg/basic/profiles/E2E/basic.ini" <<EOF
 [General]
 Name=E2E

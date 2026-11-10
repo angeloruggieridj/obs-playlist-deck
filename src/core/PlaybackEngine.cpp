@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "PlaybackEngine.hpp"
+#include <chrono>
 #include <cstdlib>
 
 namespace pld {
@@ -31,12 +32,31 @@ int PlaybackEngine::anchorBackward() const {
     return playlist_.resumeIndex(); // may be one past the end; decideOnPrev copes
 }
 
+long long PlaybackEngine::now() const {
+    if (nowMs_) return nowMs_();
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+bool PlaybackEngine::endIsStale() const {
+    if (handoverMs_ < 0) return false;
+    // A clip shorter than the window would otherwise have its own, real end
+    // swallowed and wedge the deck: half its length is the most that can be
+    // outgoing noise when the length is known.
+    long long window = kStaleEndWindowMs;
+    if (const PlaylistItem* item = playlist_.current()) {
+        if (item->durationMs > 0 && item->durationMs / 2 < window) window = item->durationMs / 2;
+    }
+    return now() - handoverMs_ < window;
+}
+
 PlaybackResult PlaybackEngine::startAt(int index) {
     if (!playlist_.setCurrent(index)) return {};
     const PlaylistItem* item = playlist_.current();
     if (!item) return {};
     if (!transport_.bound()) return {PlaybackOutcome::NoSource, index};
     awaitingStart_ = true;
+    handoverMs_ = now();
     if (!transport_.playFile(item->path)) {
         awaitingStart_ = false;
         return {PlaybackOutcome::Failed, index};
@@ -50,6 +70,7 @@ PlaybackResult PlaybackEngine::stageAt(int index) {
     if (!item) return {};
     if (!transport_.bound()) return {PlaybackOutcome::NoSource, index};
     awaitingStart_ = true;
+    handoverMs_ = now();
     if (!transport_.stageFile(item->path)) {
         awaitingStart_ = false;
         return {PlaybackOutcome::Failed, index};
@@ -95,9 +116,12 @@ PlaybackResult PlaybackEngine::mediaEnded() {
         return {};
     }
     // The handshake above only covers the order "outgoing end, then start", and
-    // only one end. OBS may also report a start first, or two ends (one for the
-    // file update, one for the restart); either way the source is by then
-    // showing the new clip, unfinished. A real end finds it at its end.
+    // only one end. Measured in OBS 33, the outgoing clip's end can also come
+    // after the new clip's starts, and it then rewrites the source's state to
+    // "ended" - so it cannot be told from a real end by state. A clip that has
+    // just been handed over cannot have finished within the window, so an end in
+    // it is the old one's. (The state check below catches the other orders.)
+    if (endIsStale()) return {};
     if (transport_.showingUnfinishedClip()) return {};
     // Nothing is current - the playing item was removed, or the deck was
     // stopped - so there is no clip for this end to belong to. Acting on it used
