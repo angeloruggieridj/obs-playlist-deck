@@ -9,72 +9,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [1.4.2] — 2026-11-10
 
-Auto-advance no longer skips an item with *Load next (paused)*, and the last
-clip of a list now stays on screen instead of going black. Both were reproduced
-on the 1.4.1 package in OBS 33.0.1 and are gone in this one. The compatibility is
-unchanged: **OBS 30.0 – 33.0.1**.
-
-### Added
-
-- **End-to-end checks inside a real OBS.** `tests/e2e` starts a portable copy of
-  the installed OBS, loads a plugin build and drives it through obs-websocket
-  (`tests/e2e/run-local-windows.ps1`): no item is skipped on auto-advance (plain
-  and *Load next (paused)*), and the last frame stays on screen at the end of the
-  list. Run against two builds it shows whether a fix works. Local only; CI does
-  not run it.
+With *Load next (paused)* the deck no longer skips an item, and the last clip of
+a list stays on screen instead of going black. The compatibility is
+**OBS 30.0 – 33.0.1**.
 
 ### Fixed
 
-- **Auto-advance still skipped an item with *Load next (paused)*.** Reproduced
-  on 1.4.1 with the Media Source: when the deck loads the queued clip, OBS
-  reports two starts and then, a third of a second later, the end of the clip
-  that was just replaced - and that late signal also rewrites the source's state
-  to "ended". The deck took it for the new clip's own end and queued the item
-  after it, so the item that should have been shown was replaced before anyone
-  saw it. The 1.3.1 guard (ignore the first end after a reload) could not catch
-  it: the starts had already arrived, and the state could not be trusted. An end
-  that comes within 1.5 s of handing the source a file is now ignored - half the
-  clip's length for a clip shorter than that, so a short sting still advances.
-  An end that arrives while the source holds an unfinished clip is ignored too.
-  Checked in OBS 33.0.1 with 3 s and 1.2 s clips, plain and *Load next
-  (paused)*.
-- **The last clip of the list ended on a black screen.** Two causes: the Media
-  Source's "Show nothing when playback ends" (on by default) blanks it, and the
-  deck stopped the source after the last item, which closes it. The deck now
-  turns that option off on the source it drives and no longer stops a clip that
-  has already finished, so the final frame stays on screen. A VLC source is not
-  changed by this.
+- **"Load next (paused)" no longer skips an item.** After a clip ended, the deck
+  could load the item after the next one, so the queued item was replaced before
+  it was ever shown. The queued item now stays loaded until you play it. It also
+  holds for very short clips.
+- **The last clip of a list no longer ends on a black screen.** When the list
+  finishes, the final frame stays on screen. This applies to the Media Source;
+  a VLC source is not changed.
 - **The version number no longer spills out of its box.** The version and the
-  "update to vX.Y.Z" link were one rich-text label, and a QLabel cannot be
-  narrower than its text: once an update was announced the label held the dock
-  open at the width of the whole sentence and was drawn over the neighbouring
-  docks. The version is now a fixed-width label and the link a separate label
-  that shortens with an ellipsis (full text in the tooltip, click opens the
-  releases page). It may also have been what kept the OBS window from fitting
-  the screen in full screen on macOS; that is not confirmed.
+  "update to vX.Y.Z" link were one label, and once an update was announced it
+  held the dock open at the width of the whole sentence and was drawn over the
+  neighbouring docks. The link is now separate and shortens with an ellipsis
+  (full text in the tooltip, click opens the releases page).
 
 ### Changed
 
-- **OBS 33 is declared supported: 30.0 – 33.0.1.** CI compiles and links
-  against the released 33.0.0 and 33.0.1 SDKs (Ubuntu 26.04), and the Windows
-  and macOS packages were run in OBS 33.0.0 (the Windows one also driven through
-  obs-websocket and, for this release, run in OBS 33.0.1). The releases are now
-  built against 33.0.1 (`OBS_VERSION`).
-
-- **The compatibility job can record an OBS version move again.** Its push
-  changes `OBS_VERSION` in the workflow file, which `GITHUB_TOKEN` is refused
-  ("without `workflows` permission"), so the job failed whenever OBS moved.
-  It now checks out and pushes over SSH with a deploy key of this repository
-  (secret `COMPAT_DEPLOY_KEY`). The Ubuntu 24.04 package stays built against
-  OBS 32.2.2, the last OBS that publishes a 24.04 package, and the Windows
-  build handles OBS 33's SDK.
-
-- **A timed-out artifact upload is retried automatically.** After 1.4.1 a green
-  macOS build failed in `actions/upload-artifact` with `ETIMEDOUT` and stayed
-  red until rerun by hand. The retry workflow now also reruns the failed jobs
-  when the only failing steps are artifact uploads, downloads or cache steps,
-  still at most twice; any other failed step is treated as a real failure. See
-  [docs/decisions.md](docs/decisions.md) §23.
+- **OBS 33 is declared supported: 30.0 – 33.0.1.** The Windows and macOS
+  packages were run in OBS 33.
 
 ## [1.4.1] — 2026-10-13
 
